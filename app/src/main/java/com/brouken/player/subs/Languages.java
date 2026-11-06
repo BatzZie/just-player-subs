@@ -42,6 +42,22 @@ public final class Languages {
         return c;
     }
 
+    /** Two letter code as used by the OpenSubtitles.com API ("nl", "pt-br", ...). */
+    public static String toIso1(String code) {
+        String c = canonical(code);
+        if (c == null) return null;
+        if (c.equals("pob")) return "pt-br";
+        if (c.equals("por")) return "pt-pt";
+        if (c.equals("zho")) return "zh-cn";
+        for (String iso1 : Locale.getISOLanguages()) {
+            try {
+                if (canonical(new Locale(iso1).getISO3Language()).equals(c)) return iso1;
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
     public static boolean matches(String a, String b) {
         String ca = canonical(a);
         return ca != null && ca.equals(canonical(b));

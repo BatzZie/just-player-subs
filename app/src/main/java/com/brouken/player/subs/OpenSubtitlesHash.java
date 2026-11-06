@@ -22,15 +22,29 @@ public final class OpenSubtitlesHash {
     }
 
     public static OpenSubtitlesHash compute(String url) throws IOException {
-        Http.RangeResult head = Http.getRange(url, 0, CHUNK);
+        Http.RangeResult head = range(url, 0);
         long size = head.totalSize;
         if (size < CHUNK * 2L) throw new IOException("Unknown or too small file size: " + size);
         // Reuse the redirect target (e.g. the Real-Debrid download URL) for the second request
-        Http.RangeResult tail = Http.getRange(head.finalUrl, size - CHUNK, CHUNK);
+        Http.RangeResult tail = range(head.finalUrl, size - CHUNK);
         long h = size;
         h += sum(head.data);
         h += sum(tail.data);
         return new OpenSubtitlesHash(String.format(Locale.ROOT, "%016x", h), size);
+    }
+
+    /** Some proxies drop the first connection while they start the stream; try a second time. */
+    private static Http.RangeResult range(String url, long start) throws IOException {
+        try {
+            return Http.getRange(url, start, CHUNK);
+        } catch (IOException first) {
+            try {
+                Thread.sleep(1500);
+            } catch (InterruptedException e) {
+                throw first;
+            }
+            return Http.getRange(url, start, CHUNK);
+        }
     }
 
     static long sum(byte[] data) {

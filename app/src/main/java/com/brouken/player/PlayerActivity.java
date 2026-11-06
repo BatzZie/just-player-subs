@@ -609,10 +609,7 @@ public class PlayerActivity extends Activity {
         });
 
         exoSubtitle.setOnLongClickListener(v -> {
-            autoSubs.showMenu(() -> {
-                enableRotation();
-                safelyStartActivityForResult(new Intent(Settings.ACTION_CAPTIONING_SETTINGS), REQUEST_SYSTEM_CAPTIONS);
-            });
+            autoSubs.showMenu();
             return true;
         });
 

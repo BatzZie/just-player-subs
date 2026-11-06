@@ -6,6 +6,13 @@ import androidx.annotation.NonNull;
 public final class SubtitleCandidate {
     public String id;
     public String url;
+    public SubtitleSource source;
+    /** Source specific (OpenSubtitles.com file id). */
+    public long fileId = -1;
+    /** Source specific id used to avoid duplicates between sources. */
+    public String legacyId;
+    /** Machine or AI translated. */
+    public boolean machineTranslated;
     public String lang;
     public String releaseName;
     public boolean hashMatch;
@@ -19,12 +26,13 @@ public final class SubtitleCandidate {
 
     public String label() {
         String name = releaseName != null && !releaseName.isEmpty() ? releaseName : id;
-        return "[" + Languages.displayName(lang) + "] " + (hashMatch ? "✓ " : "") + name;
+        return "[" + Languages.displayName(lang) + "] " + (hashMatch ? "✓ " : "") + name
+                + (source != null ? "  · " + source.name() : "");
     }
 
     @NonNull
     @Override
     public String toString() {
-        return lang + " score=" + score + (hashMatch ? " HASH" : "") + " fps=" + fpsMilli + " " + releaseName;
+        return (source != null ? source.name() + " " : "") + lang + " score=" + score + (hashMatch ? " HASH" : "") + " fps=" + fpsMilli + " " + releaseName;
     }
 }

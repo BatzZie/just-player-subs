@@ -3,47 +3,59 @@ package com.brouken.player.subs;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.preference.PreferenceManager;
+
 import java.util.ArrayList;
 import java.util.List;
 
-/** Settings and per-file memory (offset, chosen subtitle). Kept apart from upstream Prefs. */
+/**
+ * Settings (shown in the regular settings screen, stored in the default preferences with an "autosubs_" prefix)
+ * and per-file memory (offset, chosen subtitle) in a separate file.
+ */
 final class AutoSubsPrefs {
 
-    private static final String KEY_ENABLED = "enabled";
-    private static final String KEY_LANG1 = "lang1";
-    private static final String KEY_LANG2 = "lang2";
+    static final String KEY_ENABLED = "autosubs_enabled";
+    static final String KEY_LANG1 = "autosubs_lang1";
+    static final String KEY_LANG2 = "autosubs_lang2";
+    static final String KEY_PREFER_EMBEDDED = "autosubs_prefer_embedded";
+    static final String KEY_AUTO_SYNC = "autosubs_auto_sync";
+    static final String KEY_OS_API_KEY = "autosubs_os_api_key";
+    static final String KEY_OS_USERNAME = "autosubs_os_username";
+    static final String KEY_OS_PASSWORD = "autosubs_os_password";
     static final String CHOICE_OFF = "off";
 
-    private final SharedPreferences sp;
+    private final SharedPreferences settings;
+    private final SharedPreferences files;
 
     AutoSubsPrefs(Context context) {
-        sp = context.getSharedPreferences("autosubs", Context.MODE_PRIVATE);
+        settings = PreferenceManager.getDefaultSharedPreferences(context);
+        files = context.getSharedPreferences("autosubs", Context.MODE_PRIVATE);
     }
 
     boolean isEnabled() {
-        return sp.getBoolean(KEY_ENABLED, true);
+        return settings.getBoolean(KEY_ENABLED, true);
     }
 
-    void setEnabled(boolean enabled) {
-        sp.edit().putBoolean(KEY_ENABLED, enabled).apply();
+    boolean preferEmbedded() {
+        return settings.getBoolean(KEY_PREFER_EMBEDDED, true);
+    }
+
+    boolean autoSync() {
+        return settings.getBoolean(KEY_AUTO_SYNC, true);
+    }
+
+    static String defaultLanguage1() {
+        return Languages.deviceLanguage();
     }
 
     String language1() {
-        return sp.getString(KEY_LANG1, Languages.deviceLanguage());
+        return settings.getString(KEY_LANG1, defaultLanguage1());
     }
 
     /** Empty string = no second language. */
     String language2() {
         String def = "eng".equals(language1()) ? "" : "eng";
-        return sp.getString(KEY_LANG2, def);
-    }
-
-    void setLanguage1(String code) {
-        sp.edit().putString(KEY_LANG1, code).apply();
-    }
-
-    void setLanguage2(String code) {
-        sp.edit().putString(KEY_LANG2, code).apply();
+        return settings.getString(KEY_LANG2, def);
     }
 
     List<String> languages() {
@@ -54,23 +66,42 @@ final class AutoSubsPrefs {
         return list;
     }
 
+    String openSubtitlesApiKey() {
+        return settings.getString(KEY_OS_API_KEY, "").trim();
+    }
+
+    String openSubtitlesUsername() {
+        return settings.getString(KEY_OS_USERNAME, "").trim();
+    }
+
+    String openSubtitlesPassword() {
+        return settings.getString(KEY_OS_PASSWORD, "");
+    }
+
     long offset(String fileKey) {
-        return fileKey == null ? 0 : sp.getLong("offset:" + fileKey, 0);
+        return fileKey == null ? 0 : files.getLong("offset:" + fileKey, 0);
+    }
+
+    boolean hasOffset(String fileKey) {
+        return fileKey != null && files.contains("offset:" + fileKey);
     }
 
     void setOffset(String fileKey, long offsetMs) {
         if (fileKey == null) return;
-        if (offsetMs == 0) sp.edit().remove("offset:" + fileKey).apply();
-        else sp.edit().putLong("offset:" + fileKey, offsetMs).apply();
+        files.edit().putLong("offset:" + fileKey, offsetMs).apply();
+    }
+
+    void removeOffset(String fileKey) {
+        if (fileKey != null) files.edit().remove("offset:" + fileKey).apply();
     }
 
     String choice(String fileKey) {
-        return fileKey == null ? null : sp.getString("choice:" + fileKey, null);
+        return fileKey == null ? null : files.getString("choice:" + fileKey, null);
     }
 
     void setChoice(String fileKey, String choice) {
         if (fileKey == null) return;
-        if (choice == null) sp.edit().remove("choice:" + fileKey).apply();
-        else sp.edit().putString("choice:" + fileKey, choice).apply();
+        if (choice == null) files.edit().remove("choice:" + fileKey).apply();
+        else files.edit().putString("choice:" + fileKey, choice).apply();
     }
 }

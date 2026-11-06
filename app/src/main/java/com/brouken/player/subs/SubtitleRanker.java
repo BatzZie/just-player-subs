@@ -34,6 +34,7 @@ public final class SubtitleRanker {
     static int score(SubtitleCandidate c, ReleaseInfo video) {
         int score = 0;
         if (c.hashMatch) score += 100;
+        if (c.machineTranslated) score -= 15;
         ReleaseInfo r = c.release;
         if (video != null && r != null) {
             if (video.group != null && r.group != null && video.group.equalsIgnoreCase(r.group)) score += 30;

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="autosubs_menu_title">Online subtitles</string>
+    <string name="autosubs_menu_empty">Nothing to choose yet. Languages and other options are in Settings.</string>
     <string name="autosubs_status_searching">searching…</string>
     <string name="autosubs_status_found">%d found</string>
     <string name="autosubs_status_none">nothing found</string>
@@ -11,18 +12,34 @@
     <string name="autosubs_off">Off</string>
     <string name="autosubs_none">None</string>
     <string name="autosubs_item_timing">Adjust timing (%s)</string>
-    <string name="autosubs_item_language">Language: %s</string>
-    <string name="autosubs_item_language2">Second language: %s</string>
-    <string name="autosubs_item_auto_on">Search automatically: on</string>
-    <string name="autosubs_item_auto_off">Search automatically: off</string>
+    <string name="autosubs_item_sync">Auto sync with built-in subtitle</string>
+    <string name="autosubs_item_sync_running">Auto sync is running…</string>
     <string name="autosubs_item_search_again">Search again</string>
     <string name="autosubs_item_system">System caption settings</string>
     <string name="autosubs_choose_title">Choose subtitle</string>
-    <string name="autosubs_language_title">Subtitle language</string>
-    <string name="autosubs_language2_title">Second language</string>
     <string name="autosubs_timing_overlay">Subtitle timing: %1$s\n◀ earlier · later ▶ (0.5 s)   ▲ ▼ 0.1 s\nOK = done</string>
     <string name="autosubs_loaded">Subtitle: %s</string>
     <string name="autosubs_fps_corrected">frame rate corrected</string>
     <string name="autosubs_embedded_used">Using built-in %s subtitle</string>
     <string name="autosubs_load_failed">Could not load subtitle</string>
+    <string name="autosubs_sync_started">Syncing with built-in subtitle… keep watching</string>
+    <string name="autosubs_sync_done">Subtitle synced (%s)</string>
+    <string name="autosubs_sync_failed">Auto sync did not find a clear match. Use Adjust timing.</string>
+    <string name="autosubs_sync_no_reference">This video has no built-in subtitle to sync with</string>
+
+    <string name="autosubs_pref_enabled">Search subtitles automatically</string>
+    <string name="autosubs_pref_enabled_summary">For streams (e.g. from Stremio), via OpenSubtitles</string>
+    <string name="autosubs_pref_lang1">Preferred language</string>
+    <string name="autosubs_pref_lang2">Second language</string>
+    <string name="autosubs_pref_prefer_embedded">Prefer built-in subtitles</string>
+    <string name="autosubs_pref_prefer_embedded_summary">Don\'t load an online subtitle if the video already has one in your language</string>
+    <string name="autosubs_pref_auto_sync">Auto sync</string>
+    <string name="autosubs_pref_auto_sync_summary">Align the online subtitle with a built-in subtitle while you watch (when the video has one)</string>
+    <string name="autosubs_pref_os_api_key">OpenSubtitles.com API key</string>
+    <string name="autosubs_pref_os_api_key_summary">Optional: more results. Free key at opensubtitles.com/consumers</string>
+    <string name="autosubs_pref_os_api_key_help">Create a free account at opensubtitles.com, then go to opensubtitles.com/consumers and create an API consumer. Paste the key here.</string>
+    <string name="autosubs_pref_os_username">OpenSubtitles.com username</string>
+    <string name="autosubs_pref_os_username_summary">Optional: raises the daily download limit</string>
+    <string name="autosubs_pref_os_password">OpenSubtitles.com password</string>
+    <string name="autosubs_pref_system_summary">Text size, colour and background of subtitles</string>
 </resources>

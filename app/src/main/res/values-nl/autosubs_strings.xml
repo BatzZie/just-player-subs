@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="autosubs_menu_title">Online ondertitels</string>
+    <string name="autosubs_menu_empty">Nog niets te kiezen. Talen en andere opties staan in Instellingen.</string>
     <string name="autosubs_status_searching">zoeken…</string>
     <string name="autosubs_status_found">%d gevonden</string>
     <string name="autosubs_status_none">niets gevonden</string>
@@ -11,18 +12,34 @@
     <string name="autosubs_off">Uit</string>
     <string name="autosubs_none">Geen</string>
     <string name="autosubs_item_timing">Timing aanpassen (%s)</string>
-    <string name="autosubs_item_language">Taal: %s</string>
-    <string name="autosubs_item_language2">Tweede taal: %s</string>
-    <string name="autosubs_item_auto_on">Automatisch zoeken: aan</string>
-    <string name="autosubs_item_auto_off">Automatisch zoeken: uit</string>
+    <string name="autosubs_item_sync">Automatisch synchroniseren met ingebouwde ondertitel</string>
+    <string name="autosubs_item_sync_running">Automatisch synchroniseren is bezig…</string>
     <string name="autosubs_item_search_again">Opnieuw zoeken</string>
     <string name="autosubs_item_system">Systeeminstellingen ondertitels</string>
     <string name="autosubs_choose_title">Kies ondertitel</string>
-    <string name="autosubs_language_title">Taal ondertitels</string>
-    <string name="autosubs_language2_title">Tweede taal</string>
     <string name="autosubs_timing_overlay">Ondertitel timing: %1$s\n◀ eerder · later ▶ (0,5 s)   ▲ ▼ 0,1 s\nOK = klaar</string>
     <string name="autosubs_loaded">Ondertitel: %s</string>
     <string name="autosubs_fps_corrected">framerate gecorrigeerd</string>
     <string name="autosubs_embedded_used">Ingebouwde ondertitel (%s) gebruikt</string>
     <string name="autosubs_load_failed">Ondertitel laden mislukt</string>
+    <string name="autosubs_sync_started">Synchroniseren met ingebouwde ondertitel… kijk gewoon door</string>
+    <string name="autosubs_sync_done">Ondertitel gesynchroniseerd (%s)</string>
+    <string name="autosubs_sync_failed">Automatisch synchroniseren vond geen duidelijke match. Gebruik Timing aanpassen.</string>
+    <string name="autosubs_sync_no_reference">Deze video heeft geen ingebouwde ondertitel om mee te synchroniseren</string>
+
+    <string name="autosubs_pref_enabled">Automatisch ondertitels zoeken</string>
+    <string name="autosubs_pref_enabled_summary">Voor streams (bijv. vanuit Stremio), via OpenSubtitles</string>
+    <string name="autosubs_pref_lang1">Voorkeurstaal</string>
+    <string name="autosubs_pref_lang2">Tweede taal</string>
+    <string name="autosubs_pref_prefer_embedded">Ingebouwde ondertitels voorrang geven</string>
+    <string name="autosubs_pref_prefer_embedded_summary">Geen online ondertitel laden als de video er al een in jouw taal heeft</string>
+    <string name="autosubs_pref_auto_sync">Automatisch synchroniseren</string>
+    <string name="autosubs_pref_auto_sync_summary">De online ondertitel tijdens het kijken gelijkzetten met een ingebouwde ondertitel (als de video die heeft)</string>
+    <string name="autosubs_pref_os_api_key">OpenSubtitles.com API key</string>
+    <string name="autosubs_pref_os_api_key_summary">Optioneel: meer resultaten. Gratis key via opensubtitles.com/consumers</string>
+    <string name="autosubs_pref_os_api_key_help">Maak een gratis account op opensubtitles.com, ga naar opensubtitles.com/consumers en maak een API consumer aan. Plak de key hier.</string>
+    <string name="autosubs_pref_os_username">OpenSubtitles.com gebruikersnaam</string>
+    <string name="autosubs_pref_os_username_summary">Optioneel: verhoogt het aantal downloads per dag</string>
+    <string name="autosubs_pref_os_password">OpenSubtitles.com wachtwoord</string>
+    <string name="autosubs_pref_system_summary">Tekstgrootte, kleur en achtergrond van ondertitels</string>
 </resources>

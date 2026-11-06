@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -17,9 +18,11 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.text.Cue;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.SubtitleView;
 
@@ -28,9 +31,11 @@ import com.brouken.player.R;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -51,17 +56,16 @@ public final class AutoSubs implements Player.Listener {
     private enum Status { IDLE, SEARCHING, FOUND, NONE, ERROR, DISABLED, UNSUPPORTED }
 
     private static final long TICK_MS = 100;
-    private static final int MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
+    private static final long SYNC_MAX_MS = 8 * 60_000;
 
     private final Activity activity;
     private final AutoSubsPrefs prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService executor = Executors.newFixedThreadPool(3, r -> {
+    private final ExecutorService executor = Executors.newFixedThreadPool(4, r -> {
         Thread t = new Thread(r, "AutoSubs");
         t.setDaemon(true);
         return t;
     });
-    private final SubtitleSource source = new StremioOpenSubtitlesSource();
 
     private Player player;
     private PlayerView playerView;
@@ -75,6 +79,7 @@ public final class AutoSubs implements Player.Listener {
     private ReleaseInfo videoInfo;
     private List<SubtitleCandidate> all = Collections.emptyList();
     private List<SubtitleCandidate> ranked = Collections.emptyList();
+    private List<String> rankedLanguages = Collections.emptyList();
     private final Map<String, SubtitleTrack> trackCache = new HashMap<>();
 
     // Active subtitle
@@ -97,6 +102,12 @@ public final class AutoSubs implements Player.Listener {
     private boolean timingMode;
     private TextView overlay;
 
+    // Auto sync against an embedded track
+    private AutoSync sync;
+    private boolean syncAuto;
+    private long syncStartedAt;
+    private int syncNextAttempt;
+
     public AutoSubs(Activity activity) {
         this.activity = activity;
         this.prefs = new AutoSubsPrefs(activity);
@@ -117,8 +128,18 @@ public final class AutoSubs implements Player.Listener {
             reset();
             mediaUri = uri;
             startSearch();
-        } else if (active != null) {
-            // Same video, new player instance (e.g. after returning to the app)
+            return;
+        }
+        // Same video, new player instance (e.g. back from the settings screen)
+        if (status == Status.DISABLED && prefs.isEnabled()) {
+            searchAgain();
+            return;
+        }
+        if ((status == Status.FOUND || status == Status.NONE) && !prefs.languages().equals(rankedLanguages)) {
+            onLanguagesChanged();
+            return;
+        }
+        if (active != null) {
             disableBuiltInText();
             startTicking();
         }
@@ -126,6 +147,7 @@ public final class AutoSubs implements Player.Listener {
 
     public void detach() {
         exitTimingMode();
+        cancelSync();
         stopTicking();
         clearCues();
         if (player != null) {
@@ -138,6 +160,7 @@ public final class AutoSubs implements Player.Listener {
     private void reset() {
         generation++;
         exitTimingMode();
+        cancelSync();
         deactivate();
         status = Status.IDLE;
         fileName = null;
@@ -145,12 +168,23 @@ public final class AutoSubs implements Player.Listener {
         videoInfo = null;
         all = Collections.emptyList();
         ranked = Collections.emptyList();
+        rankedLanguages = Collections.emptyList();
         trackCache.clear();
         pending = null;
         pendingTrack = null;
     }
 
     // ---------------------------------------------------------------- search
+
+    private List<SubtitleSource> sources() {
+        List<SubtitleSource> list = new ArrayList<>();
+        list.add(new StremioOpenSubtitlesSource());
+        String key = prefs.openSubtitlesApiKey();
+        if (!key.isEmpty()) {
+            list.add(new OpenSubtitlesComSource(key, prefs.openSubtitlesUsername(), prefs.openSubtitlesPassword()));
+        }
+        return list;
+    }
 
     private void startSearch() {
         if (mediaUri == null) return;
@@ -174,6 +208,8 @@ public final class AutoSubs implements Player.Listener {
         final String url = mediaUri.toString();
         final ReleaseInfo info = videoInfo;
         final String name = fileName;
+        final List<String> languages = prefs.languages();
+        final List<SubtitleSource> sources = sources();
         executor.execute(() -> {
             try {
                 Future<OpenSubtitlesHash> hashFuture = executor.submit(() -> OpenSubtitlesHash.compute(url));
@@ -192,8 +228,34 @@ public final class AutoSubs implements Player.Listener {
                     post(gen, () -> onSearchDone(Collections.emptyList(), null));
                     return;
                 }
-                List<SubtitleCandidate> found = source.search(id,
-                        hash == null ? null : hash.hash, hash == null ? -1 : hash.size, name);
+                // Query all sources in parallel; one failing source doesn't stop the others
+                List<Future<List<SubtitleCandidate>>> futures = new ArrayList<>();
+                for (SubtitleSource s : sources) {
+                    final MediaId fid = id;
+                    final OpenSubtitlesHash fh = hash;
+                    futures.add(executor.submit(() -> s.search(fid, fh == null ? null : fh.hash,
+                            fh == null ? -1 : fh.size, name, languages)));
+                }
+                List<SubtitleCandidate> found = new ArrayList<>();
+                Set<String> legacyIds = new HashSet<>();
+                boolean anyOk = false;
+                for (int i = 0; i < futures.size(); i++) {
+                    try {
+                        List<SubtitleCandidate> list = futures.get(i).get(20, TimeUnit.SECONDS);
+                        anyOk = true;
+                        int added = 0;
+                        for (SubtitleCandidate c : list) {
+                            // The same subtitle can come from both OpenSubtitles sources
+                            if (c.legacyId != null && !legacyIds.add(c.legacyId)) continue;
+                            found.add(c);
+                            added++;
+                        }
+                        Log.i(TAG, sources.get(i).name() + ": " + list.size() + " results, " + added + " new");
+                    } catch (Exception e) {
+                        Log.w(TAG, sources.get(i).name() + " failed: " + e);
+                    }
+                }
+                if (!anyOk) throw new java.io.IOException("all sources failed");
                 final String key = hash == null ? null : "hash:" + hash.hash;
                 post(gen, () -> onSearchDone(found, key));
             } catch (Exception e) {
@@ -208,13 +270,14 @@ public final class AutoSubs implements Player.Listener {
         all = found;
         rerank();
         status = ranked.isEmpty() ? Status.NONE : Status.FOUND;
-        Log.i(TAG, "Found " + found.size() + " subtitles, " + ranked.size() + " in " + prefs.languages());
-        for (int i = 0; i < Math.min(5, ranked.size()); i++) Log.i(TAG, "  #" + (i + 1) + " " + ranked.get(i));
+        Log.i(TAG, "Found " + found.size() + " subtitles, " + ranked.size() + " in " + rankedLanguages);
+        for (int i = 0; i < Math.min(8, ranked.size()); i++) Log.i(TAG, "  #" + (i + 1) + " " + ranked.get(i));
         autoPick();
     }
 
     private void rerank() {
-        ranked = SubtitleRanker.rank(all, videoInfo, prefs.languages());
+        rankedLanguages = prefs.languages();
+        ranked = SubtitleRanker.rank(all, videoInfo, rankedLanguages);
     }
 
     private void autoPick() {
@@ -243,8 +306,7 @@ public final class AutoSubs implements Player.Listener {
         final int gen = generation;
         executor.execute(() -> {
             try {
-                byte[] data = Http.getBytes(c.url, MAX_SUBTITLE_BYTES);
-                SubtitleTrack track = SubtitleTrack.parse(data);
+                SubtitleTrack track = SubtitleTrack.parse(c.source.download(c));
                 if (track.size() == 0) throw new IllegalStateException("no cues");
                 post(gen, () -> {
                     trackCache.put(c.id, track);
@@ -281,7 +343,7 @@ public final class AutoSubs implements Player.Listener {
         pendingTrack = null;
         if (player == null) return;
 
-        if (auto) {
+        if (auto && prefs.preferEmbedded()) {
             Format embedded = betterEmbeddedTrack(c);
             if (embedded != null) {
                 // Make sure the built-in one is actually shown (Just Player ignores "default" flags
@@ -297,11 +359,13 @@ public final class AutoSubs implements Player.Listener {
             }
         }
 
+        cancelSync();
         active = c;
         activeTrack = track;
         long duration = player.getDuration();
         scale = track.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFrameRate(),
                 duration == C.TIME_UNSET ? -1 : duration);
+        boolean userOffset = prefs.hasOffset(fileKey);
         offsetMs = prefs.offset(fileKey);
         Log.i(TAG, "Active: " + c + " cues=" + track.size() + " lastEnd=" + track.lastEndMs()
                 + " duration=" + duration + " videoFps=" + videoFrameRate() + " scale=" + scale
@@ -313,9 +377,14 @@ public final class AutoSubs implements Player.Listener {
         String msg = activity.getString(R.string.autosubs_loaded, c.label());
         if (scale != 1.0) msg += " (" + activity.getString(R.string.autosubs_fps_corrected) + ")";
         toast(msg);
+
+        if (prefs.autoSync() && !userOffset) {
+            startSync(true);
+        }
     }
 
     private void deactivate() {
+        cancelSync();
         active = null;
         activeTrack = null;
         stopTicking();
@@ -330,15 +399,18 @@ public final class AutoSubs implements Player.Listener {
             if (group.getType() != C.TRACK_TYPE_TEXT) continue;
             for (int i = 0; i < group.length; i++) {
                 Format f = group.getTrackFormat(i);
-                if ((f.selectionFlags & C.SELECTION_FLAG_FORCED) != 0) continue;
-                if (f.label != null && f.label.toLowerCase(Locale.ROOT).contains("forced")) continue;
-                if (f.language == null) continue;
+                if (isForced(f) || f.language == null) continue;
                 for (int rank = 0; rank < languages.size() && rank <= c.langRank; rank++) {
                     if (Languages.matches(f.language, languages.get(rank))) return f;
                 }
             }
         }
         return null;
+    }
+
+    private static boolean isForced(Format f) {
+        return (f.selectionFlags & C.SELECTION_FLAG_FORCED) != 0
+                || (f.label != null && f.label.toLowerCase(Locale.ROOT).contains("forced"));
     }
 
     private float videoFrameRate() {
@@ -369,6 +441,102 @@ public final class AutoSubs implements Player.Listener {
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build());
     }
 
+    // ---------------------------------------------------------------- auto sync
+
+    /**
+     * Temporarily enables an embedded subtitle track and listens to its cue timing (it is never shown: every
+     * cue change is immediately overwritten with our own cues), then aligns our subtitle to it.
+     */
+    private void startSync(boolean auto) {
+        if (player == null || activeTrack == null || sync != null) return;
+        Tracks.Group refGroup = null;
+        int refIndex = -1;
+        int refRank = Integer.MAX_VALUE;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int i = 0; i < group.length; i++) {
+                if (!group.isTrackSupported(i)) continue;
+                Format f = group.getTrackFormat(i);
+                if (isForced(f)) continue;
+                // Same language as ours gives the most similar cue splitting, then English, then anything
+                int rank = Languages.matches(f.language, active.lang) ? 0 : Languages.matches(f.language, "eng") ? 1 : 2;
+                if (rank < refRank) {
+                    refRank = rank;
+                    refGroup = group;
+                    refIndex = i;
+                }
+            }
+        }
+        if (refGroup == null) {
+            Log.i(TAG, "AutoSync: no embedded subtitle to compare with");
+            if (!auto) toast(activity.getString(R.string.autosubs_sync_no_reference));
+            return;
+        }
+        Format ref = refGroup.getTrackFormat(refIndex);
+        Log.i(TAG, "AutoSync: reference " + ref.language + " " + ref.sampleMimeType + " " + ref.label);
+        sync = new AutoSync();
+        syncAuto = auto;
+        syncStartedAt = SystemClock.elapsedRealtime();
+        syncNextAttempt = AutoSync.WANTED;
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(new TrackSelectionOverride(refGroup.getMediaTrackGroup(), refIndex))
+                .build());
+        toast(activity.getString(R.string.autosubs_sync_started));
+        main.postDelayed(syncCheck, 2000);
+    }
+
+    private final Runnable syncCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (sync == null) return;
+            if (sync.collected() >= syncNextAttempt) {
+                Long offset = sync.estimate(activeTrack.startTimesMs(), scale);
+                if (offset != null) {
+                    finishSync(offset);
+                    return;
+                }
+                syncNextAttempt += AutoSync.WANTED;
+            }
+            if (SystemClock.elapsedRealtime() - syncStartedAt > SYNC_MAX_MS) {
+                Long offset = sync.collected() >= 6 ? sync.estimate(activeTrack.startTimesMs(), scale) : null;
+                finishSync(offset);
+                return;
+            }
+            main.postDelayed(this, 2000);
+        }
+    };
+
+    private void finishSync(Long offset) {
+        boolean auto = syncAuto;
+        int refs = sync == null ? 0 : sync.collected();
+        cancelSync();
+        if (offset == null) {
+            Log.i(TAG, "AutoSync failed after " + refs + " reference cues");
+            toast(activity.getString(R.string.autosubs_sync_failed));
+            return;
+        }
+        Log.i(TAG, "AutoSync: offset " + offsetMs + " -> " + offset + " ms (" + refs + " reference cues, auto=" + auto + ")");
+        offsetMs = offset;
+        prefs.setOffset(fileKey, offsetMs);
+        render(true);
+        toast(activity.getString(R.string.autosubs_sync_done, formatOffset(offsetMs)));
+    }
+
+    /** Stops listening to the reference track and hides built-in subtitles again. */
+    private void cancelSync() {
+        if (sync == null) return;
+        sync = null;
+        main.removeCallbacks(syncCheck);
+        if (player != null) {
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, active != null)
+                    .build());
+            textDisabledByUs = active != null;
+        }
+    }
+
     // ---------------------------------------------------------------- Player.Listener
 
     @Override
@@ -380,12 +548,27 @@ public final class AutoSubs implements Player.Listener {
 
     @Override
     public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
+        if (sync != null) return;
         // The user picked a built-in subtitle in the regular track dialog: step aside
         if (active != null && textDisabledByUs && !parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
             Log.i(TAG, "Built-in subtitle selected by user, turning online subtitle off");
             textDisabledByUs = false;
             deactivate();
         }
+    }
+
+    @Override
+    public void onCues(CueGroup cueGroup) {
+        if (sync != null && player != null) {
+            sync.onCues(cueGroup.cues.isEmpty(), player.getCurrentPosition());
+        }
+        // PlayerView has just drawn the built-in cues (its listener runs first); put ours back right away
+        if (activeTrack != null) render(true);
+    }
+
+    @Override
+    public void onPositionDiscontinuity(Player.PositionInfo oldPosition, Player.PositionInfo newPosition, int reason) {
+        if (sync != null) sync.onSeek();
     }
 
     // ---------------------------------------------------------------- rendering
@@ -461,6 +644,7 @@ public final class AutoSubs implements Player.Listener {
 
     private void enterTimingMode() {
         if (active == null || playerView == null) return;
+        cancelSync();
         timingMode = true;
         playerView.hideController();
         FrameLayout frame = playerView.getOverlayFrameLayout();
@@ -504,10 +688,10 @@ public final class AutoSubs implements Player.Listener {
         return String.format(Locale.getDefault(), "%+.1f s", ms / 1000.0);
     }
 
-    // ---------------------------------------------------------------- menu
+    // ---------------------------------------------------------------- menu (long press on subtitle button)
 
-    /** Long press on the subtitle button. */
-    public void showMenu(Runnable openSystemCaptionSettings) {
+    /** Only what you need while watching; everything else is in the settings screen. */
+    public void showMenu() {
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
 
@@ -519,31 +703,24 @@ public final class AutoSubs implements Player.Listener {
         if (active != null) {
             labels.add(activity.getString(R.string.autosubs_item_timing, formatOffset(offsetMs)));
             actions.add(this::enterTimingMode);
+            labels.add(activity.getString(sync != null ? R.string.autosubs_item_sync_running : R.string.autosubs_item_sync));
+            actions.add(() -> {
+                if (sync == null) startSync(false);
+            });
         }
-        labels.add(activity.getString(R.string.autosubs_item_language, Languages.displayName(prefs.language1())));
-        actions.add(() -> showLanguagePicker(false));
-        String l2 = prefs.language2();
-        labels.add(activity.getString(R.string.autosubs_item_language2,
-                l2.isEmpty() ? activity.getString(R.string.autosubs_none) : Languages.displayName(l2)));
-        actions.add(() -> showLanguagePicker(true));
-        labels.add(activity.getString(prefs.isEnabled() ? R.string.autosubs_item_auto_on : R.string.autosubs_item_auto_off));
-        actions.add(() -> {
-            prefs.setEnabled(!prefs.isEnabled());
-            if (prefs.isEnabled() && status == Status.DISABLED) searchAgain();
-        });
-        if (status != Status.SEARCHING && status != Status.UNSUPPORTED) {
+        if (status == Status.ERROR || status == Status.NONE) {
             labels.add(activity.getString(R.string.autosubs_item_search_again));
             actions.add(this::searchAgain);
         }
-        if (openSystemCaptionSettings != null) {
-            labels.add(activity.getString(R.string.autosubs_item_system));
-            actions.add(openSystemCaptionSettings);
-        }
 
-        new AlertDialog.Builder(activity)
-                .setTitle(activity.getString(R.string.autosubs_menu_title) + " · " + statusText())
-                .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
-                .show();
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+                .setTitle(activity.getString(R.string.autosubs_menu_title) + " · " + statusText());
+        if (labels.isEmpty()) {
+            builder.setMessage(R.string.autosubs_menu_empty).setPositiveButton(android.R.string.ok, null);
+        } else {
+            builder.setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run());
+        }
+        builder.show();
     }
 
     private String statusText() {
@@ -575,45 +752,22 @@ public final class AutoSubs implements Player.Listener {
                         prefs.setChoice(fileKey, AutoSubsPrefs.CHOICE_OFF);
                     } else {
                         SubtitleCandidate c = ranked.get(which - 1);
+                        if (c == active) return;
                         prefs.setChoice(fileKey, c.id);
+                        // A different subtitle needs its own timing
+                        prefs.removeOffset(fileKey);
                         select(c, false);
                     }
                 })
                 .show();
     }
 
-    private void showLanguagePicker(boolean second) {
-        List<String> codes = new ArrayList<>();
-        if (second) codes.add("");
-        String device = Languages.deviceLanguage();
-        codes.add(device);
-        for (String c : Languages.COMMON) if (!c.equals(device)) codes.add(c);
-
-        String current = second ? prefs.language2() : prefs.language1();
-        String[] labels = new String[codes.size()];
-        int checked = -1;
-        for (int i = 0; i < codes.size(); i++) {
-            String c = codes.get(i);
-            labels[i] = c.isEmpty() ? activity.getString(R.string.autosubs_none) : Languages.displayName(c);
-            if (c.equals(current)) checked = i;
-        }
-        new AlertDialog.Builder(activity)
-                .setTitle(second ? R.string.autosubs_language2_title : R.string.autosubs_language_title)
-                .setSingleChoiceItems(labels, checked, (d, which) -> {
-                    d.dismiss();
-                    if (second) prefs.setLanguage2(codes.get(which));
-                    else prefs.setLanguage1(codes.get(which));
-                    onLanguagesChanged();
-                })
-                .show();
-    }
-
     private void onLanguagesChanged() {
-        if (status != Status.FOUND && status != Status.NONE) return;
         deactivate();
         prefs.setChoice(fileKey, null);
         rerank();
         status = ranked.isEmpty() ? Status.NONE : Status.FOUND;
+        Log.i(TAG, "Languages changed to " + rankedLanguages + ", " + ranked.size() + " candidates");
         autoPick();
     }
 

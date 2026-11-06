@@ -20,6 +20,41 @@ final class Http {
         byte[] data;
     }
 
+    static final class Response {
+        int code;
+        String body;
+    }
+
+    /** Request with extra headers and an optional JSON body. Does not throw on HTTP errors. */
+    static Response request(String method, String url, java.util.Map<String, String> headers, String jsonBody)
+            throws IOException {
+        HttpURLConnection c = open(url);
+        try {
+            c.setRequestMethod(method);
+            if (headers != null) {
+                for (java.util.Map.Entry<String, String> h : headers.entrySet()) {
+                    c.setRequestProperty(h.getKey(), h.getValue());
+                }
+            }
+            if (jsonBody != null) {
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                byte[] body = jsonBody.getBytes(StandardCharsets.UTF_8);
+                c.setFixedLengthStreamingMode(body.length);
+                try (java.io.OutputStream os = c.getOutputStream()) {
+                    os.write(body);
+                }
+            }
+            Response r = new Response();
+            r.code = c.getResponseCode();
+            InputStream is = r.code >= 400 ? c.getErrorStream() : c.getInputStream();
+            r.body = is == null ? "" : new String(readUpTo(is, 4 * 1024 * 1024), StandardCharsets.UTF_8);
+            return r;
+        } finally {
+            c.disconnect();
+        }
+    }
+
     static String getString(String url) throws IOException {
         return new String(getBytes(url, 8 * 1024 * 1024), StandardCharsets.UTF_8);
     }

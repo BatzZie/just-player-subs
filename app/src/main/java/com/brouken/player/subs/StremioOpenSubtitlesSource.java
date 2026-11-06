@@ -18,7 +18,18 @@ public final class StremioOpenSubtitlesSource implements SubtitleSource {
     private static final String BASE = "https://opensubtitles-v3.strem.io";
 
     @Override
-    public List<SubtitleCandidate> search(MediaId id, String hash, long size, String fileName) throws IOException {
+    public String name() {
+        return "OpenSubtitles";
+    }
+
+    @Override
+    public byte[] download(SubtitleCandidate candidate) throws IOException {
+        return Http.getBytes(candidate.url, 4 * 1024 * 1024);
+    }
+
+    @Override
+    public List<SubtitleCandidate> search(MediaId id, String hash, long size, String fileName, List<String> languages)
+            throws IOException {
         StringBuilder extra = new StringBuilder();
         if (fileName != null) append(extra, "filename", fileName);
         if (hash != null && size > 0) {
@@ -36,10 +47,12 @@ public final class StremioOpenSubtitlesSource implements SubtitleSource {
             for (int i = 0; i < subs.length(); i++) {
                 JSONObject s = subs.getJSONObject(i);
                 SubtitleCandidate c = new SubtitleCandidate();
-                c.id = s.optString("id");
+                c.legacyId = s.optString("id");
+                c.id = "os3:" + c.legacyId;
+                c.source = this;
                 c.url = s.optString("url");
                 c.lang = Languages.canonical(s.optString("lang"));
-                if (c.url.isEmpty() || !seen.add(c.id.isEmpty() ? c.url : c.id)) continue;
+                if (c.url.isEmpty() || !seen.add(c.legacyId.isEmpty() ? c.url : c.legacyId)) continue;
                 c.releaseName = s.optString("movieReleaseName", s.optString("subtitleFileName"));
                 // "m" tells how the addon matched: "i" = by IMDb id, "h" = by file hash
                 c.hashMatch = "h".equals(s.optString("m"));

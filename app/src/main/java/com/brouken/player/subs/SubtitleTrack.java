@@ -38,6 +38,7 @@ public final class SubtitleTrack {
     }
 
     public static SubtitleTrack parse(byte[] data) {
+        data = toUtf8(data);
         SubtitleParser parser;
         String head = new String(data, 0, Math.min(data.length, 2048), StandardCharsets.UTF_8);
         if (head.startsWith("﻿")) head = head.substring(1);
@@ -61,6 +62,30 @@ public final class SubtitleTrack {
             entries.add(new Entry(c.startTimeUs, end, c.cues));
         }
         return new SubtitleTrack(entries);
+    }
+
+    /** Files without valid UTF-8 are almost always Windows-1252 (Western European). */
+    static byte[] toUtf8(byte[] data) {
+        if (data.length >= 2 && ((data[0] == (byte) 0xFF && data[1] == (byte) 0xFE)
+                || (data[0] == (byte) 0xFE && data[1] == (byte) 0xFF))) {
+            return data; // UTF-16 with BOM, the parsers handle it
+        }
+        try {
+            StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(data));
+            return data;
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return new String(data, java.nio.charset.Charset.forName("windows-1252")).getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    /** Start times of all cues in ms (subtitle time, before scale and offset). */
+    public long[] startTimesMs() {
+        long[] out = new long[starts.length];
+        for (int i = 0; i < starts.length; i++) out[i] = starts[i] / 1000;
+        return out;
     }
 
     public int size() {
@@ -121,7 +146,7 @@ public final class SubtitleTrack {
             }
         }
         // Subtitle runs well past the end of the video: probably made for a slower frame rate
-        if (durationKnown && last > videoDurationMs + 20_000) {
+        if (durationKnown && videoDurationMs > 10 * 60_000 && last > videoDurationMs + 20_000) {
             double[] candidates = {23.976 / 25.0, 24.0 / 25.0};
             for (double f : candidates) {
                 if (last * f <= videoDurationMs + 2000) return f;
