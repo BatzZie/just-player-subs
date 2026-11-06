@@ -16,7 +16,7 @@ final class AutoSync {
     static final int WANTED = 16;
     private static final long MAX_OFFSET_MS = 120_000;
     private static final long BUCKET_MS = 100;
-    private static final long MATCH_MS = 300;
+    private static final long MATCH_MS = 500;
 
     private final List<Long> refStarts = new ArrayList<>();
     private boolean lastEmpty = true;
@@ -48,45 +48,35 @@ final class AutoSync {
      * @return offset in ms (display = subtitle time * scale + offset), or null if no clear match was found
      */
     Long estimate(long[] subStartsMs, double scale) {
-        if (refStarts.size() < 6 || subStartsMs.length == 0) return null;
+        if (refStarts.size() < 8 || subStartsMs.length == 0) return null;
         double[] subs = new double[subStartsMs.length];
         for (int i = 0; i < subs.length; i++) subs[i] = subStartsMs[i] * scale;
         Arrays.sort(subs);
 
-        int buckets = (int) (2 * MAX_OFFSET_MS / BUCKET_MS) + 1;
-        int[] votes = new int[buckets];
-        for (long r : refStarts) {
-            boolean[] voted = new boolean[buckets];
-            int from = lowerBound(subs, r - MAX_OFFSET_MS);
-            for (int i = from; i < subs.length && subs[i] <= r + MAX_OFFSET_MS; i++) {
-                double d = r - subs[i];
-                int b = (int) Math.round((d + MAX_OFFSET_MS) / BUCKET_MS);
-                if (b >= 0 && b < buckets && !voted[b]) {
-                    voted[b] = true;
-                    votes[b]++;
-                }
+        // For every candidate offset: how many reference cues have one of our cues within MATCH_MS
+        int steps = (int) (2 * MAX_OFFSET_MS / BUCKET_MS) + 1;
+        int[] matches = new int[steps];
+        for (int k = 0; k < steps; k++) {
+            double d = k * BUCKET_MS - MAX_OFFSET_MS;
+            int count = 0;
+            for (long r : refStarts) {
+                int i = lowerBound(subs, r - d - MATCH_MS);
+                if (i < subs.length && subs[i] <= r - d + MATCH_MS) count++;
             }
+            matches[k] = count;
         }
-        // Peak of the smoothed histogram (a match can fall in a neighbouring bucket)
-        int best = -1, bestVotes = 0, second = 0;
-        for (int b = 0; b < buckets; b++) {
-            int v = votes[b] + (b > 0 ? votes[b - 1] : 0) + (b + 1 < buckets ? votes[b + 1] : 0);
-            if (v > bestVotes) {
-                bestVotes = v;
-                best = b;
-            }
+        int best = 0;
+        for (int k = 1; k < steps; k++) if (matches[k] > matches[best]) best = k;
+        // Best offset clearly away from the winner (not its own shoulders)
+        int second = 0;
+        int margin = (int) (1500 / BUCKET_MS);
+        for (int k = 0; k < steps; k++) {
+            if (Math.abs(k - best) > margin) second = Math.max(second, matches[k]);
         }
-        if (best < 0) return null;
         double coarse = best * BUCKET_MS - MAX_OFFSET_MS;
-        for (int b = 0; b < buckets; b++) {
-            if (Math.abs(b - best) <= 10) continue;
-            int v = votes[b] + (b > 0 ? votes[b - 1] : 0) + (b + 1 < buckets ? votes[b + 1] : 0);
-            second = Math.max(second, v);
-        }
 
-        // Refine: median of the differences that agree with the peak
+        // Refine: median of the nearest differences around the winner
         List<Double> diffs = new ArrayList<>();
-        int matched = 0;
         for (long r : refStarts) {
             double bestDiff = Double.NaN;
             int from = lowerBound(subs, r - coarse - MATCH_MS);
@@ -94,15 +84,15 @@ final class AutoSync {
                 double d = r - subs[i];
                 if (Double.isNaN(bestDiff) || Math.abs(d - coarse) < Math.abs(bestDiff - coarse)) bestDiff = d;
             }
-            if (!Double.isNaN(bestDiff)) {
-                diffs.add(bestDiff);
-                matched++;
-            }
+            if (!Double.isNaN(bestDiff)) diffs.add(bestDiff);
         }
-        int needed = Math.max(5, (int) Math.ceil(refStarts.size() * 0.45));
+        int matched = matches[best];
+        // Reference and online subtitle are made by different people: many cues won't line up exactly.
+        // Require a clear winner instead of a high match ratio.
+        int needed = Math.max(6, (int) Math.ceil(refStarts.size() * 0.35));
         android.util.Log.i(AutoSubs.TAG, "AutoSync: refs=" + refStarts.size() + " matched=" + matched
-                + " peak=" + bestVotes + " second=" + second + " coarse=" + (long) coarse);
-        if (matched < needed || bestVotes < second * 1.5) return null;
+                + " second=" + second + " coarse=" + (long) coarse);
+        if (matched < needed || matched < second * 1.6 || diffs.isEmpty()) return null;
         java.util.Collections.sort(diffs);
         return Math.round(diffs.get(diffs.size() / 2));
     }

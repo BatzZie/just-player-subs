@@ -30,7 +30,6 @@ public final class AutoSubsSettings {
 
         PreferenceCategory category = new PreferenceCategory(ctx);
         category.setTitle(R.string.autosubs_menu_title);
-        category.setIconSpaceReserved(false);
         screen.addPreference(category);
 
         SwitchPreferenceCompat enabled = new SwitchPreferenceCompat(ctx);
@@ -131,7 +130,6 @@ public final class AutoSubsSettings {
     }
 
     private static void add(PreferenceCategory category, Preference p) {
-        p.setIconSpaceReserved(false);
         category.addPreference(p);
     }
 

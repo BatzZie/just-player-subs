@@ -217,7 +217,8 @@ public final class AutoSubs implements Player.Listener {
                 if (id == null) id = MediaIdentifier.lookup(info);
                 OpenSubtitlesHash hash = null;
                 try {
-                    hash = hashFuture.get(20, TimeUnit.SECONDS);
+                    // Some debrid links are slow to start; don't hold up the search for a hash
+                    hash = hashFuture.get(5, TimeUnit.SECONDS);
                     Log.i(TAG, "Hash: " + hash.hash + " size " + hash.size);
                 } catch (Exception e) {
                     hashFuture.cancel(true);
@@ -225,7 +226,7 @@ public final class AutoSubs implements Player.Listener {
                 }
                 Log.i(TAG, "Id: " + id);
                 if (id == null) {
-                    post(gen, () -> onSearchDone(Collections.emptyList(), null));
+                    post(gen, () -> onSearchDone(Collections.emptyList()));
                     return;
                 }
                 // Query all sources in parallel; one failing source doesn't stop the others
@@ -256,8 +257,7 @@ public final class AutoSubs implements Player.Listener {
                     }
                 }
                 if (!anyOk) throw new java.io.IOException("all sources failed");
-                final String key = hash == null ? null : "hash:" + hash.hash;
-                post(gen, () -> onSearchDone(found, key));
+                post(gen, () -> onSearchDone(found));
             } catch (Exception e) {
                 Log.w(TAG, "Search failed", e);
                 post(gen, () -> status = Status.ERROR);
@@ -265,8 +265,7 @@ public final class AutoSubs implements Player.Listener {
         });
     }
 
-    private void onSearchDone(List<SubtitleCandidate> found, String hashKey) {
-        if (hashKey != null) fileKey = hashKey;
+    private void onSearchDone(List<SubtitleCandidate> found) {
         all = found;
         rerank();
         status = ranked.isEmpty() ? Status.NONE : Status.FOUND;
@@ -496,7 +495,8 @@ public final class AutoSubs implements Player.Listener {
                     finishSync(offset);
                     return;
                 }
-                syncNextAttempt += AutoSync.WANTED;
+                syncNextAttempt += AutoSync.WANTED / 2;
+                Log.i(TAG, "AutoSync: no clear match yet, next attempt at " + syncNextAttempt + " cues");
             }
             if (SystemClock.elapsedRealtime() - syncStartedAt > SYNC_MAX_MS) {
                 Long offset = sync.collected() >= 6 ? sync.estimate(activeTrack.startTimesMs(), scale) : null;
@@ -526,6 +526,7 @@ public final class AutoSubs implements Player.Listener {
     /** Stops listening to the reference track and hides built-in subtitles again. */
     private void cancelSync() {
         if (sync == null) return;
+        Log.i(TAG, "AutoSync: stopped with " + sync.collected() + " reference cues");
         sync = null;
         main.removeCallbacks(syncCheck);
         if (player != null) {
@@ -560,7 +561,11 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onCues(CueGroup cueGroup) {
         if (sync != null && player != null) {
-            sync.onCues(cueGroup.cues.isEmpty(), player.getCurrentPosition());
+            // presentationTimeUs is the exact cue time; the player position is only a fallback
+            long position = player.getCurrentPosition();
+            long t = cueGroup.presentationTimeUs != C.TIME_UNSET ? cueGroup.presentationTimeUs / 1000 : position;
+            if (Math.abs(t - position) > 5000) t = position;
+            sync.onCues(cueGroup.cues.isEmpty(), t);
         }
         // PlayerView has just drawn the built-in cues (its listener runs first); put ours back right away
         if (activeTrack != null) render(true);
