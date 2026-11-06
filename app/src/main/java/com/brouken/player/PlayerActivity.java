@@ -208,6 +208,7 @@ public class PlayerActivity extends Activity {
     DisplayManager displayManager;
     DisplayManager.DisplayListener displayListener;
     SubtitleFinder subtitleFinder;
+    com.brouken.player.subs.AutoSubs autoSubs;
 
     Runnable barsHider = () -> {
         if (playerView != null && !controllerVisible) {
@@ -249,7 +250,7 @@ public class PlayerActivity extends Activity {
         }
 
         final Intent launchIntent = getIntent();
-        com.brouken.player.subs.IntentLogger.log("onCreate", launchIntent);
+        autoSubs = new com.brouken.player.subs.AutoSubs(this);
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
 
@@ -608,8 +609,10 @@ public class PlayerActivity extends Activity {
         });
 
         exoSubtitle.setOnLongClickListener(v -> {
-            enableRotation();
-            safelyStartActivityForResult(new Intent(Settings.ACTION_CAPTIONING_SETTINGS), REQUEST_SYSTEM_CAPTIONS);
+            autoSubs.showMenu(() -> {
+                enableRotation();
+                safelyStartActivityForResult(new Intent(Settings.ACTION_CAPTIONING_SETTINGS), REQUEST_SYSTEM_CAPTIONS);
+            });
             return true;
         });
 
@@ -796,7 +799,6 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        com.brouken.player.subs.IntentLogger.log("onNewIntent", intent);
 
         if (intent != null) {
             final String action = intent.getAction();
@@ -955,6 +957,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (autoSubs.dispatchKeyEvent(event)) return true;
         if (isScaling) {
             final int keyCode = event.getKeyCode();
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -1318,6 +1321,7 @@ public class PlayerActivity extends Activity {
                 mediaItemBuilder.setSubtitleConfigurations(Collections.singletonList(subtitle));
             }
             player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
+            autoSubs.attach(player, playerView, mPrefs.mediaUri);
 
             try {
                 if (loudnessEnhancer != null) {
@@ -1409,6 +1413,7 @@ public class PlayerActivity extends Activity {
         }
 
         if (player != null) {
+            autoSubs.detach();
             notifyAudioSessionUpdate(false);
 
 //            mediaSession.setActive(false);
