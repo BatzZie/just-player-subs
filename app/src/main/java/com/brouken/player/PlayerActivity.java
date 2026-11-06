@@ -249,6 +249,7 @@ public class PlayerActivity extends Activity {
         }
 
         final Intent launchIntent = getIntent();
+        com.brouken.player.subs.IntentLogger.log("onCreate", launchIntent);
         final String action = launchIntent.getAction();
         final String type = launchIntent.getType();
 
@@ -795,6 +796,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        com.brouken.player.subs.IntentLogger.log("onNewIntent", intent);
 
         if (intent != null) {
             final String action = intent.getAction();
