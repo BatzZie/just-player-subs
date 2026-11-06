@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         def abiFilter = project.findProperty("abiFilter")
-        applicationId "com.brouken.player"
+        applicationId "com.brouken.player.subs"
         minSdkVersion 24
         targetSdkVersion 36
         versionCode 219
@@ -23,7 +23,7 @@ android {
         }
     }
     base {
-        archivesName = "Just.Player.v${defaultConfig.versionName}"
+        archivesName = "Just.Player.Subs.v${defaultConfig.versionName}"
     }
     buildTypes {
         release {
