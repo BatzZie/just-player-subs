@@ -44,9 +44,15 @@ import java.util.concurrent.TimeUnit;
 /**
  * Finds, loads and shows online subtitles for the playing video.
  * <p>
- * The subtitle is drawn by this class on the player's SubtitleView (not added as a Media3 track), so it can
- * arrive at any moment without reloading the stream, and timing changes apply instantly.
- * <p>
+ * How it works without slowing playback down:
+ * <ul>
+ * <li>Before playback starts, an embedded text track (preferred language, else English) is requested, so the
+ * player never has to re-buffer for a track change later.</li>
+ * <li>AutoSubs owns the SubtitleView: it draws the online subtitle itself, and every cue change of the embedded
+ * track is immediately overwritten (PlayerView's listener runs first). The embedded track is only shown when it is
+ * the better choice.</li>
+ * <li>The embedded track's timing is recorded from the first second and used to auto sync the online subtitle.</li>
+ * </ul>
  * Hooks in PlayerActivity: attach() after setMediaItem, detach() on release, dispatchKeyEvent(), showMenu().
  */
 public final class AutoSubs implements Player.Listener {
@@ -56,7 +62,8 @@ public final class AutoSubs implements Player.Listener {
     private enum Status { IDLE, SEARCHING, FOUND, NONE, ERROR, DISABLED, UNSUPPORTED }
 
     private static final long TICK_MS = 100;
-    private static final long SYNC_MAX_MS = 8 * 60_000;
+    private static final long SYNC_CHECK_MS = 1000;
+    private static final long SYNC_MAX_MS = 10 * 60_000;
 
     private final Activity activity;
     private final AutoSubsPrefs prefs;
@@ -82,12 +89,21 @@ public final class AutoSubs implements Player.Listener {
     private List<String> rankedLanguages = Collections.emptyList();
     private final Map<String, SubtitleTrack> trackCache = new HashMap<>();
 
-    // Active subtitle
+    // Display ownership
+    /** We chose the text track and decide what is shown in the SubtitleView. */
+    private boolean owning;
+    /** Text track selection we set; anything else means the user picked a track himself. */
+    private String ownTextSelection;
+    /** The embedded subtitle is the better choice: let its cues through. */
+    private boolean embeddedChosen;
+    /** The user turned online subtitles off for this video. */
+    private boolean userOff;
+
+    // Active online subtitle
     private SubtitleCandidate active;
     private SubtitleTrack activeTrack;
     private double scale = 1.0;
     private long offsetMs;
-    private boolean textDisabledByUs;
 
     // Waiting for the player to become ready (duration and frame rate are needed for activation)
     private SubtitleCandidate pending;
@@ -102,11 +118,13 @@ public final class AutoSubs implements Player.Listener {
     private boolean timingMode;
     private TextView overlay;
 
-    // Auto sync against an embedded track
-    private AutoSync sync;
-    private boolean syncAuto;
+    // Auto sync
+    private AutoSync sync = new AutoSync();
+    private boolean syncWanted;
+    private boolean syncManual;
     private long syncStartedAt;
     private int syncNextAttempt;
+    private boolean syncProvisional;
 
     public AutoSubs(Activity activity) {
         this.activity = activity;
@@ -121,16 +139,17 @@ public final class AutoSubs implements Player.Listener {
         }
         this.player = player;
         this.playerView = playerView;
-        textDisabledByUs = false;
         player.addListener(this);
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
             mediaUri = uri;
             startSearch();
+            if (status == Status.SEARCHING) takeTextTrack();
             return;
         }
-        // Same video, new player instance (e.g. back from the settings screen)
+        // Same video, new player instance (e.g. back from the settings screen); still before prepare()
+        if (owning) takeTextTrack();
         if (status == Status.DISABLED && prefs.isEnabled()) {
             searchAgain();
             return;
@@ -140,28 +159,30 @@ public final class AutoSubs implements Player.Listener {
             return;
         }
         if (active != null) {
-            disableBuiltInText();
             startTicking();
+            if (syncWanted) scheduleSyncCheck();
         }
     }
 
     public void detach() {
         exitTimingMode();
-        cancelSync();
         stopTicking();
+        main.removeCallbacks(syncCheck);
         clearCues();
         if (player != null) {
             player.removeListener(this);
         }
         player = null;
-        textDisabledByUs = false;
     }
 
     private void reset() {
         generation++;
         exitTimingMode();
-        cancelSync();
-        deactivate();
+        stopTicking();
+        main.removeCallbacks(syncCheck);
+        clearCues();
+        active = null;
+        activeTrack = null;
         status = Status.IDLE;
         fileName = null;
         fileKey = null;
@@ -172,6 +193,43 @@ public final class AutoSubs implements Player.Listener {
         trackCache.clear();
         pending = null;
         pendingTrack = null;
+        owning = false;
+        ownTextSelection = null;
+        embeddedChosen = false;
+        userOff = false;
+        sync = new AutoSync();
+        syncWanted = false;
+        syncManual = false;
+        syncProvisional = false;
+    }
+
+    /** Ask the player for an embedded text track up front (preferred languages, then English as sync reference). */
+    private void takeTextTrack() {
+        if (player == null) return;
+        List<String> langs = new ArrayList<>();
+        for (String l : prefs.languages()) {
+            String iso1 = Languages.toIso1(l);
+            if (iso1 != null && !langs.contains(iso1)) langs.add(iso1);
+        }
+        if (!langs.contains("en")) langs.add("en");
+        TrackSelectionParameters params = player.getTrackSelectionParameters().buildUpon()
+                .setPreferredTextLanguages(langs.toArray(new String[0]))
+                .setSelectUndeterminedTextLanguage(true)
+                .build();
+        owning = true;
+        ownTextSelection = textSelection(params);
+        player.setTrackSelectionParameters(params);
+    }
+
+    private static String textSelection(TrackSelectionParameters p) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.preferredTextLanguages).append('|')
+                .append(p.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)).append('|')
+                .append(p.ignoredTextSelectionFlags).append('|');
+        for (TrackSelectionOverride o : p.overrides.values()) {
+            if (o.getType() == C.TRACK_TYPE_TEXT) sb.append(o.mediaTrackGroup.id).append(o.trackIndices);
+        }
+        return sb.toString();
     }
 
     // ---------------------------------------------------------------- search
@@ -210,39 +268,28 @@ public final class AutoSubs implements Player.Listener {
         final String name = fileName;
         final List<String> languages = prefs.languages();
         final List<SubtitleSource> sources = sources();
+        final long started = SystemClock.elapsedRealtime();
+        // No file hash: it needs extra requests on the same debrid link while the player is starting up
         executor.execute(() -> {
             try {
-                Future<OpenSubtitlesHash> hashFuture = executor.submit(() -> OpenSubtitlesHash.compute(url));
                 MediaId id = MediaIdentifier.fromUrl(url, info);
                 if (id == null) id = MediaIdentifier.lookup(info);
-                OpenSubtitlesHash hash = null;
-                try {
-                    // Some debrid links are slow to start; don't hold up the search for a hash
-                    hash = hashFuture.get(5, TimeUnit.SECONDS);
-                    Log.i(TAG, "Hash: " + hash.hash + " size " + hash.size);
-                } catch (Exception e) {
-                    hashFuture.cancel(true);
-                    Log.w(TAG, "Hash failed: " + e);
-                }
                 Log.i(TAG, "Id: " + id);
                 if (id == null) {
                     post(gen, () -> onSearchDone(Collections.emptyList()));
                     return;
                 }
-                // Query all sources in parallel; one failing source doesn't stop the others
                 List<Future<List<SubtitleCandidate>>> futures = new ArrayList<>();
                 for (SubtitleSource s : sources) {
                     final MediaId fid = id;
-                    final OpenSubtitlesHash fh = hash;
-                    futures.add(executor.submit(() -> s.search(fid, fh == null ? null : fh.hash,
-                            fh == null ? -1 : fh.size, name, languages)));
+                    futures.add(executor.submit(() -> s.search(fid, null, -1, name, languages)));
                 }
                 List<SubtitleCandidate> found = new ArrayList<>();
                 Set<String> legacyIds = new HashSet<>();
                 boolean anyOk = false;
                 for (int i = 0; i < futures.size(); i++) {
                     try {
-                        List<SubtitleCandidate> list = futures.get(i).get(20, TimeUnit.SECONDS);
+                        List<SubtitleCandidate> list = futures.get(i).get(15, TimeUnit.SECONDS);
                         anyOk = true;
                         int added = 0;
                         for (SubtitleCandidate c : list) {
@@ -257,10 +304,14 @@ public final class AutoSubs implements Player.Listener {
                     }
                 }
                 if (!anyOk) throw new java.io.IOException("all sources failed");
+                Log.i(TAG, "Search took " + (SystemClock.elapsedRealtime() - started) + " ms");
                 post(gen, () -> onSearchDone(found));
             } catch (Exception e) {
                 Log.w(TAG, "Search failed", e);
-                post(gen, () -> status = Status.ERROR);
+                post(gen, () -> {
+                    status = Status.ERROR;
+                    updateEmbeddedChoice();
+                });
             }
         });
     }
@@ -271,6 +322,7 @@ public final class AutoSubs implements Player.Listener {
         status = ranked.isEmpty() ? Status.NONE : Status.FOUND;
         Log.i(TAG, "Found " + found.size() + " subtitles, " + ranked.size() + " in " + rankedLanguages);
         for (int i = 0; i < Math.min(8, ranked.size()); i++) Log.i(TAG, "  #" + (i + 1) + " " + ranked.get(i));
+        updateEmbeddedChoice();
         autoPick();
     }
 
@@ -282,7 +334,10 @@ public final class AutoSubs implements Player.Listener {
     private void autoPick() {
         if (ranked.isEmpty()) return;
         String remembered = prefs.choice(fileKey);
-        if (AutoSubsPrefs.CHOICE_OFF.equals(remembered)) return;
+        if (AutoSubsPrefs.CHOICE_OFF.equals(remembered)) {
+            userOff = true;
+            return;
+        }
         SubtitleCandidate c = find(remembered);
         boolean auto = c == null;
         if (c == null) c = ranked.get(0);
@@ -315,7 +370,6 @@ public final class AutoSubs implements Player.Listener {
                 Log.w(TAG, "Download failed for " + c.id + ": " + e);
                 post(gen, () -> {
                     if (!auto) toast(activity.getString(R.string.autosubs_load_failed));
-                    // Try the next one automatically
                     if (auto) {
                         int i = ranked.indexOf(c);
                         if (i >= 0 && i + 1 < ranked.size() && i < 3) select(ranked.get(i + 1), true);
@@ -343,14 +397,10 @@ public final class AutoSubs implements Player.Listener {
         if (player == null) return;
 
         if (auto && prefs.preferEmbedded()) {
-            Format embedded = betterEmbeddedTrack(c);
-            if (embedded != null) {
-                // Make sure the built-in one is actually shown (Just Player ignores "default" flags
-                // when system captions are off)
-                player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        .setPreferredTextLanguage(embedded.language)
-                        .build());
+            Format embedded = selectedEmbeddedText();
+            int rank = embedded == null ? -1 : languageRank(embedded.language);
+            if (rank >= 0 && rank <= c.langRank) {
+                embeddedChosen = true;
                 Log.i(TAG, "Using embedded subtitle " + embedded.language + " instead of " + c);
                 toast(activity.getString(R.string.autosubs_embedded_used,
                         Languages.displayName(Languages.canonical(embedded.language))));
@@ -358,9 +408,16 @@ public final class AutoSubs implements Player.Listener {
             }
         }
 
-        cancelSync();
+        if (!owning) {
+            // Chosen from the menu after the user had picked a built-in track: draw over it again
+            owning = true;
+            ownTextSelection = textSelection(player.getTrackSelectionParameters());
+        }
+        boolean switching = active != null && active != c;
         active = c;
         activeTrack = track;
+        embeddedChosen = false;
+        userOff = false;
         long duration = player.getDuration();
         scale = track.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFrameRate(),
                 duration == C.TIME_UNSET ? -1 : duration);
@@ -368,43 +425,60 @@ public final class AutoSubs implements Player.Listener {
         offsetMs = prefs.offset(fileKey);
         Log.i(TAG, "Active: " + c + " cues=" + track.size() + " lastEnd=" + track.lastEndMs()
                 + " duration=" + duration + " videoFps=" + videoFrameRate() + " scale=" + scale
-                + " offset=" + offsetMs);
-
-        disableBuiltInText();
+                + " offset=" + offsetMs + " referenceCues=" + sync.collected());
         startTicking();
 
         String msg = activity.getString(R.string.autosubs_loaded, c.label());
         if (scale != 1.0) msg += " (" + activity.getString(R.string.autosubs_fps_corrected) + ")";
         toast(msg);
 
-        if (prefs.autoSync() && !userOffset) {
-            startSync(true);
-        }
+        if (switching) sync.resetAgreement();
+        if (prefs.autoSync() && !userOffset) startSync(false);
     }
 
     private void deactivate() {
-        cancelSync();
         active = null;
         activeTrack = null;
+        syncWanted = false;
+        main.removeCallbacks(syncCheck);
         stopTicking();
         clearCues();
-        enableBuiltInText();
     }
 
-    /** An embedded, non-forced text track in a language at least as preferred as the candidate's. */
-    private Format betterEmbeddedTrack(SubtitleCandidate c) {
-        List<String> languages = prefs.languages();
+    /** The embedded text track the player selected, if it isn't a forced-only track. */
+    private Format selectedEmbeddedText() {
+        if (player == null) return null;
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
-            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            if (group.getType() != C.TRACK_TYPE_TEXT || !group.isSelected()) continue;
             for (int i = 0; i < group.length; i++) {
-                Format f = group.getTrackFormat(i);
-                if (isForced(f) || f.language == null) continue;
-                for (int rank = 0; rank < languages.size() && rank <= c.langRank; rank++) {
-                    if (Languages.matches(f.language, languages.get(rank))) return f;
+                if (group.isTrackSelected(i)) {
+                    Format f = group.getTrackFormat(i);
+                    return isForced(f) ? null : f;
                 }
             }
         }
         return null;
+    }
+
+    private int languageRank(String language) {
+        if (language == null) return -1;
+        List<String> languages = prefs.languages();
+        for (int i = 0; i < languages.size(); i++) {
+            if (Languages.matches(language, languages.get(i))) return i;
+        }
+        return -1;
+    }
+
+    /** Without an online subtitle, show the embedded one if it is in a wanted language. */
+    private void updateEmbeddedChoice() {
+        if (!owning || active != null || userOff || embeddedChosen) return;
+        if (status == Status.SEARCHING || pending != null) return;
+        if (status == Status.FOUND && !ranked.isEmpty()) return;
+        Format embedded = selectedEmbeddedText();
+        if (embedded != null && languageRank(embedded.language) >= 0) {
+            embeddedChosen = true;
+            Log.i(TAG, "No online subtitle, showing embedded " + embedded.language);
+        }
     }
 
     private static boolean isForced(Format f) {
@@ -426,115 +500,71 @@ public final class AutoSubs implements Player.Listener {
         return -1;
     }
 
-    private void disableBuiltInText() {
-        if (player == null) return;
-        textDisabledByUs = true;
-        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build());
-    }
-
-    private void enableBuiltInText() {
-        if (player == null || !textDisabledByUs) return;
-        textDisabledByUs = false;
-        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build());
-    }
-
     // ---------------------------------------------------------------- auto sync
 
-    /**
-     * Temporarily enables an embedded subtitle track and listens to its cue timing (it is never shown: every
-     * cue change is immediately overwritten with our own cues), then aligns our subtitle to it.
-     */
-    private void startSync(boolean auto) {
-        if (player == null || activeTrack == null || sync != null) return;
-        Tracks.Group refGroup = null;
-        int refIndex = -1;
-        int refRank = Integer.MAX_VALUE;
-        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
-            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
-            for (int i = 0; i < group.length; i++) {
-                if (!group.isTrackSupported(i)) continue;
-                Format f = group.getTrackFormat(i);
-                if (isForced(f)) continue;
-                // Same language as ours gives the most similar cue splitting, then English, then anything
-                int rank = Languages.matches(f.language, active.lang) ? 0 : Languages.matches(f.language, "eng") ? 1 : 2;
-                if (rank < refRank) {
-                    refRank = rank;
-                    refGroup = group;
-                    refIndex = i;
-                }
-            }
-        }
-        if (refGroup == null) {
-            Log.i(TAG, "AutoSync: no embedded subtitle to compare with");
-            if (!auto) toast(activity.getString(R.string.autosubs_sync_no_reference));
+    private void startSync(boolean manual) {
+        if (activeTrack == null) return;
+        if (manual && selectedEmbeddedText() == null && sync.collected() == 0) {
+            toast(activity.getString(R.string.autosubs_sync_no_reference));
             return;
         }
-        Format ref = refGroup.getTrackFormat(refIndex);
-        Log.i(TAG, "AutoSync: reference " + ref.language + " " + ref.sampleMimeType + " " + ref.label);
-        sync = new AutoSync();
-        syncAuto = auto;
+        syncWanted = true;
+        syncManual = manual;
+        syncProvisional = false;
         syncStartedAt = SystemClock.elapsedRealtime();
-        syncNextAttempt = AutoSync.WANTED;
-        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(new TrackSelectionOverride(refGroup.getMediaTrackGroup(), refIndex))
-                .build());
-        toast(activity.getString(R.string.autosubs_sync_started));
-        main.postDelayed(syncCheck, 2000);
+        syncNextAttempt = Math.max(AutoSync.FIRST_ATTEMPT, sync.collected());
+        sync.resetAgreement();
+        if (manual) toast(activity.getString(R.string.autosubs_sync_started));
+        scheduleSyncCheck();
+    }
+
+    private void scheduleSyncCheck() {
+        main.removeCallbacks(syncCheck);
+        main.post(syncCheck);
     }
 
     private final Runnable syncCheck = new Runnable() {
         @Override
         public void run() {
-            if (sync == null) return;
-            if (sync.collected() >= syncNextAttempt) {
-                Long offset = sync.estimate(activeTrack.startTimesMs(), scale);
-                if (offset != null) {
-                    finishSync(offset);
+            if (!syncWanted || activeTrack == null) return;
+            while (sync.collected() >= syncNextAttempt) {
+                syncNextAttempt = sync.collected() + 2;
+                AutoSync.Result r = sync.estimate(activeTrack.startTimesMs(), scale);
+                if (r == null) continue;
+                if (r.level == AutoSync.Level.FINAL) {
+                    finishSync(r.offsetMs);
                     return;
                 }
-                syncNextAttempt += AutoSync.WANTED / 2;
-                Log.i(TAG, "AutoSync: no clear match yet, next attempt at " + syncNextAttempt + " cues");
+                // Provisional: apply quietly, confirm later
+                if (Math.abs(r.offsetMs - offsetMs) > 150) {
+                    Log.i(TAG, "AutoSync: provisional offset " + offsetMs + " -> " + r.offsetMs);
+                    offsetMs = r.offsetMs;
+                    syncProvisional = true;
+                    render(true);
+                }
             }
             if (SystemClock.elapsedRealtime() - syncStartedAt > SYNC_MAX_MS) {
-                Long offset = sync.collected() >= 6 ? sync.estimate(activeTrack.startTimesMs(), scale) : null;
-                finishSync(offset);
+                Log.i(TAG, "AutoSync gave up after " + sync.collected() + " reference cues, provisional=" + syncProvisional);
+                syncWanted = false;
+                if (syncManual || syncProvisional) {
+                    toast(activity.getString(R.string.autosubs_sync_failed));
+                }
                 return;
             }
-            main.postDelayed(this, 2000);
+            main.postDelayed(this, SYNC_CHECK_MS);
         }
     };
 
-    private void finishSync(Long offset) {
-        boolean auto = syncAuto;
-        int refs = sync == null ? 0 : sync.collected();
-        cancelSync();
-        if (offset == null) {
-            Log.i(TAG, "AutoSync failed after " + refs + " reference cues");
-            toast(activity.getString(R.string.autosubs_sync_failed));
-            return;
-        }
-        Log.i(TAG, "AutoSync: offset " + offsetMs + " -> " + offset + " ms (" + refs + " reference cues, auto=" + auto + ")");
+    private void finishSync(long offset) {
+        syncWanted = false;
+        long change = offset - prefs.offset(fileKey);
+        Log.i(TAG, "AutoSync: final offset " + offset + " ms after " + sync.collected() + " reference cues, "
+                + ((SystemClock.elapsedRealtime() - syncStartedAt) / 1000) + " s");
         offsetMs = offset;
         prefs.setOffset(fileKey, offsetMs);
         render(true);
-        toast(activity.getString(R.string.autosubs_sync_done, formatOffset(offsetMs)));
-    }
-
-    /** Stops listening to the reference track and hides built-in subtitles again. */
-    private void cancelSync() {
-        if (sync == null) return;
-        Log.i(TAG, "AutoSync: stopped with " + sync.collected() + " reference cues");
-        sync = null;
-        main.removeCallbacks(syncCheck);
-        if (player != null) {
-            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
-                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, active != null)
-                    .build());
-            textDisabledByUs = active != null;
+        if (syncManual || Math.abs(change) >= 300) {
+            toast(activity.getString(R.string.autosubs_sync_done, formatOffset(offsetMs)));
         }
     }
 
@@ -548,32 +578,34 @@ public final class AutoSubs implements Player.Listener {
     }
 
     @Override
+    public void onTracksChanged(Tracks tracks) {
+        updateEmbeddedChoice();
+    }
+
+    @Override
     public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
-        if (sync != null) return;
-        // The user picked a built-in subtitle in the regular track dialog: step aside
-        if (active != null && textDisabledByUs && !parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
-            Log.i(TAG, "Built-in subtitle selected by user, turning online subtitle off");
-            textDisabledByUs = false;
-            deactivate();
-        }
+        if (!owning || textSelection(parameters).equals(ownTextSelection)) return;
+        // The user picked (or switched off) a built-in subtitle in the regular track dialog: step aside
+        Log.i(TAG, "Text track changed by user, online subtitle off");
+        owning = false;
+        deactivate();
     }
 
     @Override
     public void onCues(CueGroup cueGroup) {
-        if (sync != null && player != null) {
-            // presentationTimeUs is the exact cue time; the player position is only a fallback
-            long position = player.getCurrentPosition();
-            long t = cueGroup.presentationTimeUs != C.TIME_UNSET ? cueGroup.presentationTimeUs / 1000 : position;
-            if (Math.abs(t - position) > 5000) t = position;
-            sync.onCues(cueGroup.cues.isEmpty(), t);
-        }
-        // PlayerView has just drawn the built-in cues (its listener runs first); put ours back right away
-        if (activeTrack != null) render(true);
+        if (!owning || player == null) return;
+        // presentationTimeUs is the exact cue time; the player position is only a fallback
+        long position = player.getCurrentPosition();
+        long t = cueGroup.presentationTimeUs != C.TIME_UNSET ? cueGroup.presentationTimeUs / 1000 : position;
+        if (Math.abs(t - position) > 5000) t = position;
+        sync.onCues(cueGroup.cues.isEmpty(), t);
+        // PlayerView has just drawn the embedded cues (its listener runs first); replace them unless wanted
+        if (!embeddedChosen) render(true);
     }
 
     @Override
     public void onPositionDiscontinuity(Player.PositionInfo oldPosition, Player.PositionInfo newPosition, int reason) {
-        if (sync != null) sync.onSeek();
+        if (reason == Player.DISCONTINUITY_REASON_SEEK) sync.onSeek();
     }
 
     // ---------------------------------------------------------------- rendering
@@ -596,11 +628,13 @@ public final class AutoSubs implements Player.Listener {
         main.removeCallbacks(tick);
     }
 
+    /** Shows our cues, or nothing when no online subtitle is active (embedded cues are hidden). */
     private void render(boolean force) {
-        if (player == null || playerView == null || activeTrack == null) return;
+        if (player == null || playerView == null) return;
         SubtitleView view = playerView.getSubtitleView();
         if (view == null) return;
-        List<Cue> cues = activeTrack.cuesAt(player.getCurrentPosition(), scale, offsetMs);
+        List<Cue> cues = activeTrack == null ? Collections.emptyList()
+                : activeTrack.cuesAt(player.getCurrentPosition(), scale, offsetMs);
         // Re-set now and then in case the player cleared the view
         if (force || !cues.equals(lastCues) || ++ticksSinceSet >= 10) {
             view.setCues(cues);
@@ -649,7 +683,8 @@ public final class AutoSubs implements Player.Listener {
 
     private void enterTimingMode() {
         if (active == null || playerView == null) return;
-        cancelSync();
+        syncWanted = false;
+        main.removeCallbacks(syncCheck);
         timingMode = true;
         playerView.hideController();
         FrameLayout frame = playerView.getOverlayFrameLayout();
@@ -708,9 +743,9 @@ public final class AutoSubs implements Player.Listener {
         if (active != null) {
             labels.add(activity.getString(R.string.autosubs_item_timing, formatOffset(offsetMs)));
             actions.add(this::enterTimingMode);
-            labels.add(activity.getString(sync != null ? R.string.autosubs_item_sync_running : R.string.autosubs_item_sync));
+            labels.add(activity.getString(syncWanted ? R.string.autosubs_item_sync_running : R.string.autosubs_item_sync));
             actions.add(() -> {
-                if (sync == null) startSync(false);
+                if (!syncWanted) startSync(true);
             });
         }
         if (status == Status.ERROR || status == Status.NONE) {
@@ -754,6 +789,8 @@ public final class AutoSubs implements Player.Listener {
                     d.dismiss();
                     if (which == 0) {
                         deactivate();
+                        userOff = true;
+                        embeddedChosen = false;
                         prefs.setChoice(fileKey, AutoSubsPrefs.CHOICE_OFF);
                     } else {
                         SubtitleCandidate c = ranked.get(which - 1);
@@ -769,10 +806,13 @@ public final class AutoSubs implements Player.Listener {
 
     private void onLanguagesChanged() {
         deactivate();
+        embeddedChosen = false;
+        userOff = false;
         prefs.setChoice(fileKey, null);
         rerank();
         status = ranked.isEmpty() ? Status.NONE : Status.FOUND;
         Log.i(TAG, "Languages changed to " + rankedLanguages + ", " + ranked.size() + " candidates");
+        updateEmbeddedChoice();
         autoPick();
     }
 
@@ -781,6 +821,7 @@ public final class AutoSubs implements Player.Listener {
         reset();
         mediaUri = uri;
         startSearch();
+        if (status == Status.SEARCHING) takeTextTrack();
     }
 
     // ---------------------------------------------------------------- helpers

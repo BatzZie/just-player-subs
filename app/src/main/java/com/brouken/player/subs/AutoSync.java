@@ -2,6 +2,7 @@ package com.brouken.player.subs;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -9,55 +10,71 @@ import java.util.List;
  * (an embedded track of the video). Reference cue start times are collected while the video plays.
  * <p>
  * Works on cue start times only, so the reference may be in another language or even a bitmap (PGS) track.
+ * Two confidence levels: a provisional estimate early on, and a final one that needs more evidence.
+ * Thresholds were tuned by simulation on a real subtitle (noise, missing cues, unrelated references).
  */
 final class AutoSync {
 
-    /** Reference cues needed before an estimate is attempted. */
-    static final int WANTED = 16;
+    static final int FIRST_ATTEMPT = 8;
     private static final long MAX_OFFSET_MS = 120_000;
-    private static final long BUCKET_MS = 100;
+    private static final long STEP_MS = 100;
     private static final long MATCH_MS = 500;
+
+    enum Level { PROVISIONAL, FINAL }
+
+    static final class Result {
+        final long offsetMs;
+        final Level level;
+
+        Result(long offsetMs, Level level) {
+            this.offsetMs = offsetMs;
+            this.level = level;
+        }
+    }
 
     private final List<Long> refStarts = new ArrayList<>();
     private boolean lastEmpty = true;
-    private long lastPosition = -1;
+    private long lastStart = -1;
+    private double previousCoarse = Double.NaN;
+    private int agreeing;
 
     /** Called with every cue change of the reference track. */
-    void onCues(boolean empty, long positionMs) {
-        if (!empty && lastEmpty) {
-            // Ignore duplicates caused by re-sent cues at (almost) the same position
-            if (lastPosition < 0 || Math.abs(positionMs - lastPosition) > 200) {
-                refStarts.add(positionMs);
-                lastPosition = positionMs;
-            }
+    void onCues(boolean empty, long timeMs) {
+        if (!empty && lastEmpty && (lastStart < 0 || Math.abs(timeMs - lastStart) > 200)) {
+            refStarts.add(timeMs);
+            lastStart = timeMs;
         }
         lastEmpty = empty;
+    }
+
+    /** A different online subtitle was chosen: earlier agreement doesn't count any more. */
+    void resetAgreement() {
+        previousCoarse = Double.NaN;
+        agreeing = 0;
     }
 
     int collected() {
         return refStarts.size();
     }
 
-    /** Resets the "previous state" after a seek so a cue that was already showing isn't counted. */
+    /** After a seek a cue may already be showing; don't count it as a new start. */
     void onSeek() {
         lastEmpty = false;
-        lastPosition = -1;
+        lastStart = -1;
     }
 
-    /**
-     * @return offset in ms (display = subtitle time * scale + offset), or null if no clear match was found
-     */
-    Long estimate(long[] subStartsMs, double scale) {
-        if (refStarts.size() < 8 || subStartsMs.length == 0) return null;
+    /** @return estimate (display = subtitle time * scale + offset) or null if there isn't enough evidence yet */
+    Result estimate(long[] subStartsMs, double scale) {
+        if (refStarts.size() < FIRST_ATTEMPT || subStartsMs.length == 0) return null;
         double[] subs = new double[subStartsMs.length];
         for (int i = 0; i < subs.length; i++) subs[i] = subStartsMs[i] * scale;
         Arrays.sort(subs);
 
         // For every candidate offset: how many reference cues have one of our cues within MATCH_MS
-        int steps = (int) (2 * MAX_OFFSET_MS / BUCKET_MS) + 1;
+        int steps = (int) (2 * MAX_OFFSET_MS / STEP_MS) + 1;
         int[] matches = new int[steps];
         for (int k = 0; k < steps; k++) {
-            double d = k * BUCKET_MS - MAX_OFFSET_MS;
+            double d = k * STEP_MS - MAX_OFFSET_MS;
             int count = 0;
             for (long r : refStarts) {
                 int i = lowerBound(subs, r - d - MATCH_MS);
@@ -67,13 +84,27 @@ final class AutoSync {
         }
         int best = 0;
         for (int k = 1; k < steps; k++) if (matches[k] > matches[best]) best = k;
-        // Best offset clearly away from the winner (not its own shoulders)
         int second = 0;
-        int margin = (int) (1500 / BUCKET_MS);
+        int margin = (int) (1500 / STEP_MS);
         for (int k = 0; k < steps; k++) {
             if (Math.abs(k - best) > margin) second = Math.max(second, matches[k]);
         }
-        double coarse = best * BUCKET_MS - MAX_OFFSET_MS;
+        double coarse = best * STEP_MS - MAX_OFFSET_MS;
+        int matched = matches[best];
+
+        if (!Double.isNaN(previousCoarse) && Math.abs(coarse - previousCoarse) <= 300) agreeing++;
+        else agreeing = 0;
+        previousCoarse = coarse;
+
+        int needed = Math.max(6, (int) Math.ceil(refStarts.size() * 0.35));
+        Level level = null;
+        if (matched >= needed) {
+            if (matched >= second * 2.0 || (agreeing >= 3 && matched >= second * 1.5)) level = Level.FINAL;
+            else if (matched >= second * 1.6 || (agreeing >= 2 && matched >= second * 1.3)) level = Level.PROVISIONAL;
+        }
+        android.util.Log.i(AutoSubs.TAG, "AutoSync: refs=" + refStarts.size() + " matched=" + matched
+                + " second=" + second + " agreeing=" + agreeing + " coarse=" + (long) coarse + " -> " + level);
+        if (level == null) return null;
 
         // Refine: median of the nearest differences around the winner
         List<Double> diffs = new ArrayList<>();
@@ -86,15 +117,9 @@ final class AutoSync {
             }
             if (!Double.isNaN(bestDiff)) diffs.add(bestDiff);
         }
-        int matched = matches[best];
-        // Reference and online subtitle are made by different people: many cues won't line up exactly.
-        // Require a clear winner instead of a high match ratio.
-        int needed = Math.max(6, (int) Math.ceil(refStarts.size() * 0.35));
-        android.util.Log.i(AutoSubs.TAG, "AutoSync: refs=" + refStarts.size() + " matched=" + matched
-                + " second=" + second + " coarse=" + (long) coarse);
-        if (matched < needed || matched < second * 1.6 || diffs.isEmpty()) return null;
-        java.util.Collections.sort(diffs);
-        return Math.round(diffs.get(diffs.size() / 2));
+        if (diffs.isEmpty()) return null;
+        Collections.sort(diffs);
+        return new Result(Math.round(diffs.get(diffs.size() / 2)), level);
     }
 
     private static int lowerBound(double[] a, double v) {
