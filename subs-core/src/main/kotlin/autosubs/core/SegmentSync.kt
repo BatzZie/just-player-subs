@@ -72,6 +72,7 @@ object SegmentSync {
             }
             start += STEP_MS
         }
+        CoreLog.i("SegmentSync: ${windows.size} windows " + windows.joinToString(" ") { "${it.center / 60_000}m:${it.offset}" })
         if (windows.size < 2) return null
 
         // 2. Merge neighbouring windows with the same offset (a lone deviating window is ignored)

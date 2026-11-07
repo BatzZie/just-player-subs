@@ -125,6 +125,30 @@ class AutoSync {
             return if (r != null && r.level == Level.FINAL) r else null
         }
 
+        /** Frame rate ratios that subtitles are commonly made for (relative to the video): 24 vs 23.976, PAL speed-up. */
+        private val SCALES = doubleArrayOf(24.0 / 23.976, 23.976 / 24.0, 25.0 / 23.976, 23.976 / 25.0, 25.0 / 24.0, 24.0 / 25.0)
+
+        /**
+         * Like [estimateAll], but also tries the common frame rate ratios on top of [baseScale] and keeps one only
+         * if it fits clearly better. Needs a complete reference (MKV index): with it the frame rate can be measured
+         * instead of trusting subtitle metadata.
+         * @return the scale to use and its result, or null if nothing fits
+         */
+        @JvmStatic
+        fun estimateWithScale(refStartsMs: List<Long>, subStartsMs: LongArray, baseScale: Double): Pair<Double, Result>? {
+            var best: Pair<Double, Result>? = estimateAll(refStartsMs, subStartsMs, baseScale)?.let { baseScale to it }
+            val baseFit = best?.second?.fit() ?: 0.0
+            for (f in SCALES) {
+                val s = baseScale * f
+                val r = estimateAll(refStartsMs, subStartsMs, s) ?: continue
+                if (r.fit() >= baseFit + 0.1 && (best == null || r.fit() > best.second.fit())) best = s to r
+            }
+            if (best != null && best.first != baseScale) {
+                CoreLog.i("AutoSync: frame rate correction ${"%.5f".format(best.first)} fits ${"%.2f".format(best.second.fit())} (was ${"%.2f".format(baseFit)})")
+            }
+            return best
+        }
+
         /**
          * Picks the subtitle that fits a complete reference best. Each entry: candidate id to its start times.
          * @return id and result of the best fitting subtitle, or null if none gives a clear match

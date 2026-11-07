@@ -3,6 +3,7 @@ package autosubs.core
 import java.io.File
 import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -121,5 +122,35 @@ class PickBestTest {
         kotlin.test.assertEquals("good", result?.first)
         assertTrue(Math.abs(result!!.second.offsetMs + 1200) < 100, "offset ${result.second.offsetMs}")
         assertTrue(result.second.fit() > 0.9)
+    }
+}
+
+class FrameRateMeasureTest {
+    private fun subtitle(seed: Int, lengthMs: Long): LongArray {
+        val r = Random(seed)
+        var t = 20_000L
+        val out = ArrayList<Long>()
+        while (t < lengthMs) { t += 1000 + r.nextLong(6000); out.add(t) }
+        return out.toLongArray()
+    }
+
+    @Test fun measures24vs23976() {
+        // Subtitle timed for 24 fps, video 23.976: drifts ~1.1 s over 19 minutes
+        val sub = subtitle(11, 19 * 60_000L)
+        val r = Random(12)
+        val ref = sub.filter { r.nextDouble() > 0.3 }.map { (it * (24.0 / 23.976)).toLong() + 400 + (r.nextDouble() * 300 - 150).toLong() }
+        val plain = AutoSync.estimateAll(ref, sub, 1.0)
+        val measured = assertNotNull(AutoSync.estimateWithScale(ref, sub, 1.0))
+        assertTrue(Math.abs(measured.first - 24.0 / 23.976) < 1e-9, "scale ${measured.first}")
+        assertTrue(measured.second.fit() > (plain?.fit() ?: 0.0) + 0.1, "fit ${measured.second.fit()} vs ${plain?.fit()}")
+        assertTrue(Math.abs(measured.second.offsetMs - 400) < 150, "offset ${measured.second.offsetMs}")
+    }
+
+    @Test fun keepsScaleWhenItAlreadyFits() {
+        val sub = subtitle(13, 40 * 60_000L)
+        val r = Random(14)
+        val ref = sub.filter { r.nextDouble() > 0.3 }.map { it + 1_850 + (r.nextDouble() * 300 - 150).toLong() }
+        val measured = assertNotNull(AutoSync.estimateWithScale(ref, sub, 1.0))
+        assertEquals(1.0, measured.first)
     }
 }

@@ -196,6 +196,7 @@ public final class AutoSubs implements Player.Listener {
         if (skin != null) skin.onPlayerStarted(player);
 
         if (uri == null || !uri.equals(mediaUri)) {
+            stremioSyncToken.incrementAndGet();
             reset();
             mediaUri = uri;
             startSearch();
@@ -354,6 +355,9 @@ public final class AutoSubs implements Player.Listener {
      * ignores the result of external players it doesn't know and can overwrite the library when it comes back to
      * the front, so the write is repeated a few times.
      */
+    /** Each stop (and each new start) gets a new token; older background writes stop when they see a newer one. */
+    private static final java.util.concurrent.atomic.AtomicLong stremioSyncToken = new java.util.concurrent.atomic.AtomicLong();
+
     private boolean reportToStremio(boolean finished) {
         final String authKey = prefs.stremioAuthKeyForSync();
         final MediaId id = mediaId;
@@ -363,6 +367,7 @@ public final class AutoSubs implements Player.Listener {
         if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
         final boolean done = finished || pos >= dur * 0.95;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
+        final long token = stremioSyncToken.incrementAndGet();
         Thread t = new Thread(() -> {
             autosubs.core.StremioApi api = new autosubs.core.StremioApi();
             // A finished video is written once (repeating would count it as watched again)
@@ -371,6 +376,10 @@ public final class AutoSubs implements Player.Listener {
                 try {
                     long wait = started + at - System.currentTimeMillis();
                     if (wait > 0) Thread.sleep(wait);
+                    if (stremioSyncToken.get() != token) {
+                        Log.i(TAG, "Stremio sync for " + id + " at " + (pos / 1000) + "s superseded");
+                        return;
+                    }
                     if (at > 0) Log.i(TAG, "Stremio state after " + (at / 1000) + "s: " + api.describe(authKey, id));
                     boolean isNew = api.reportProgress(authKey, id, pos, dur, at == 0 ? watched : 0, done);
                     Log.i(TAG, "Stremio progress written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
@@ -855,9 +864,12 @@ public final class AutoSubs implements Player.Listener {
                 if (t.size() == 0) continue;
                 double sc = c == current ? currentScale
                         : t.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFps, duration);
-                AutoSync.Result r = AutoSync.estimateAll(refs, t.startTimesMs(), sc);
+                // With the complete index the frame rate ratio can be measured instead of trusted
+                kotlin.Pair<Double, AutoSync.Result> measured = AutoSync.estimateWithScale(refs, t.startTimesMs(), sc);
+                AutoSync.Result r = measured == null ? null : measured.getSecond();
+                if (measured != null) sc = measured.getFirst();
                 Log.i(TAG, "Fit " + String.format(Locale.ROOT, "%.2f", r == null ? 0.0 : r.fit()) + " offset "
-                        + (r == null ? "-" : r.offsetMs + " ms") + ": " + c);
+                        + (r == null ? "-" : r.offsetMs + " ms") + " scale " + String.format(Locale.ROOT, "%.5f", sc) + ": " + c);
                 tracks.put(c.id, t);
                 scales.put(c.id, sc);
                 if (r != null) results.put(c.id, r);
@@ -894,6 +906,11 @@ public final class AutoSubs implements Player.Listener {
                 } else if (segResults.get(current.id) != null) {
                     applySegments(segResults.get(current.id));
                 } else if (cur != null) {
+                    Double measuredScale = scales.get(current.id);
+                    if (measuredScale != null && measuredScale != scale) {
+                        Log.i(TAG, "Frame rate correction: scale " + scale + " -> " + measuredScale);
+                        scale = measuredScale;
+                    }
                     finishSync(cur.offsetMs);
                 } else if (manual) {
                     startSync(true); // fall back to watching along
