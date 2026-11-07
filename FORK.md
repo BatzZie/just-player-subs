@@ -13,12 +13,22 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
 - Auto sync: reads every embedded subtitle start time from the MKV index (Cues) with two small range requests
   and aligns the online subtitle within ~1 s of playback start. Fallback: listens to an embedded track while
   playing.
-- Frame rate correction (25 vs 23.976 fps), manual timing with the D-pad, per-file memory.
+- Frame rate measured from the index (24 vs 23.976, PAL), piecewise sync for other cuts, agreeing-window sync
+  for dense references with drift correction; best of the top 3 candidates chosen by fit.
+- Manual timing with the D-pad, per-file memory. Local files (content://, file://): OpenSubtitles hash and MKV
+  index read from the file; a subtitle file next to the video wins.
 - Faster stream start: OkHttp with Happy Eyeballs (IPv6/IPv4 race) and no sidecar `.srt` probes on streams.
+- Modern controls (PlayerSkin): buttons bottom left, times next to a rounded accent time bar, accent color and
+  time format as settings, remote-friendly focus; small notices top right.
+- Started by Stremio: Stremio's loading screen stays visible until the first frame (black first for HDR/DV).
+- Watch progress for Stremio (optional login): Stremio's TV app mishandles external player results
+  (Stremio/stremio-bugs#2892), so from 90% a completion result is sent (Stremio marks watched / plays next) and
+  below that the position is written to the account; resume reads the account.
 
 ## Using it
 
-- Settings → "Online subtitles": languages, automatic search, prefer built-in, auto sync, OpenSubtitles.com.
+- Settings → "Online subtitles": languages, automatic search, prefer built-in, auto sync, OpenSubtitles.com;
+  "Stremio": account login and progress sync; "Player look": modern controls, accent color, time format.
 - In the player: long press the subtitle button → choose subtitle, adjust timing, auto sync.
 - Logs: `adb logcat -s AutoSubs` (stream tokens are redacted).
 
