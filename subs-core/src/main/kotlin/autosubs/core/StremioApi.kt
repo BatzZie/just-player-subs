@@ -60,15 +60,24 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
     @Throws(IOException::class)
     fun reportProgress(authKey: String, id: MediaId, positionMs: Long, durationMs: Long, watchedMs: Long, finished: Boolean): Boolean {
         val existing = getLibraryItem(authKey, id.imdbId)
-        var name: String? = null
-        var poster: String? = null
-        if (existing == null) {
-            val m = meta(id.type(), id.imdbId)
-            name = m.first
-            poster = m.second
-        }
-        putLibraryItem(authKey, withProgress(existing, id.imdbId, id.type(), id.videoId(), name, poster,
-            positionMs, durationMs, watchedMs, finished, now()))
+        val meta = fullMeta(id.type(), id.imdbId)
+        var item = withProgress(existing, id.imdbId, id.type(), id.videoId(), meta?.name, meta?.poster,
+            positionMs, durationMs, watchedMs, finished, now())
+        // Stremio marks an episode as watched when it hands it to an external player: undo that for this video
+        // (or mark it when it was watched to the end)
+        val state = item["state"].obj() ?: JsonObject(emptyMap())
+        val newState: JsonObject = if (id.isSeries() && meta != null && meta.videos.isNotEmpty()) {
+            val ids = WatchedBitField.sortedVideoIds(meta.videos)
+            val field = WatchedBitField.parse(state.str("watched").ifEmpty { null }, ids)
+            val before = field.get(id.videoId())
+            field.set(id.videoId(), finished)
+            CoreLog.i("Stremio watched ${id.videoId()}: $before -> $finished (${ids.size} videos)")
+            JsonObject(state + ("watched" to JsonPrimitive(field.toString())))
+        } else if (!id.isSeries() && !finished) {
+            JsonObject(state + ("flaggedWatched" to JsonPrimitive(0)))
+        } else state
+        item = JsonObject(item + ("state" to newState))
+        putLibraryItem(authKey, item)
         return existing == null
     }
 
@@ -142,13 +151,27 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
             }
         }
 
-        /** Name and poster from Cinemeta, for items that are not in the library yet. */
+        class Meta(val name: String?, val poster: String?, val videos: List<WatchedBitField.Companion.Video>)
+
+        /** Name, poster and episode list from Cinemeta (the source Stremio uses for the watched order). */
         @JvmStatic
-        fun meta(type: String, id: String): Pair<String?, String?> = try {
+        fun fullMeta(type: String, id: String): Meta? = try {
             val m = JsonUtil.parse(Http.getString("https://v3-cinemeta.strem.io/meta/$type/$id.json")).obj()?.get("meta").obj()
-            (m?.str("name")?.ifEmpty { null }) to (m?.str("poster")?.ifEmpty { null })
+            if (m == null) null else Meta(
+                m.str("name").ifEmpty { null },
+                m.str("poster").ifEmpty { null },
+                m["videos"].arr()?.mapNotNull { el ->
+                    val v = el.obj() ?: return@mapNotNull null
+                    val released = v.str("released").ifEmpty { null }?.let {
+                        try { java.time.Instant.parse(it).toEpochMilli() } catch (e: Exception) { null }
+                    }
+                    WatchedBitField.Companion.Video(v.str("id"),
+                        if (v.has("season")) v.long("season", 0) else null,
+                        if (v.has("episode")) v.long("episode", 0) else if (v.has("number")) v.long("number", 0) else null,
+                        released)
+                } ?: emptyList())
         } catch (e: Exception) {
-            null to null
+            null
         }
     }
 }
