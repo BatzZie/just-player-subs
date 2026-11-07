@@ -78,6 +78,7 @@ public final class PlayerSkin {
     private Player player;
     private ImageButton playButton;
     private LinearLayout controls;
+    private PlayerView playerView;
     private boolean scrubbing;
     private int barBottomSet = -1;
 
@@ -120,6 +121,7 @@ public final class PlayerSkin {
     }
 
     private void applyTo(PlayerView playerView) {
+        this.playerView = playerView;
         // Soft gradients: dark at the top (title) and bottom (controls), clear in the middle
         View background = playerView.findViewById(R.id.exo_controls_background);
         if (background != null) {
@@ -230,35 +232,61 @@ public final class PlayerSkin {
                 ? R.string.exo_controls_play_description : R.string.exo_controls_pause_description));
     }
 
-    /**
-     * Left/right stays within the button row (it used to jump to the time bar), up goes to the time bar and down
-     * from the time bar comes back to the play button.
-     */
+    /** Not used for navigation any more (see dispatchKeyEvent); keeps ids for accessibility. */
     private void linkFocus() {
         if (controls == null) return;
-        List<View> buttons = new ArrayList<>();
         for (int i = 0; i < controls.getChildCount(); i++) {
             View v = controls.getChildAt(i);
-            if (v.getVisibility() == View.VISIBLE && v.isFocusable()) {
-                if (v.getId() == View.NO_ID) v.setId(View.generateViewId());
-                buttons.add(v);
+            if (v.isFocusable() && v.getId() == View.NO_ID) v.setId(View.generateViewId());
+        }
+    }
+
+    private boolean usable(View v) {
+        return v.getVisibility() == View.VISIBLE && v.isFocusable() && v.isEnabled();
+    }
+
+    /**
+     * Remote control navigation in the controls: left/right moves to the next usable button of the row (disabled
+     * buttons are skipped, it never jumps to the time bar), up goes to the time bar, down from the time bar
+     * comes back to the play button.
+     */
+    private boolean navigate(KeyEvent event) {
+        if (playerView == null || controls == null || !playerView.isControllerFullyVisible()) return false;
+        View focused = activity.getCurrentFocus();
+        if (focused == null) return false;
+        int key = event.getKeyCode();
+        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+        if (focused.getParent() == controls) {
+            if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (down) {
+                    int step = key == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
+                    for (int i = controls.indexOfChild(focused) + step; i >= 0 && i < controls.getChildCount(); i += step) {
+                        View v = controls.getChildAt(i);
+                        if (usable(v)) {
+                            v.requestFocus();
+                            break;
+                        }
+                    }
+                }
+                return true;
             }
+            if (key == KeyEvent.KEYCODE_DPAD_UP) {
+                if (down && timeBar != null && usable(timeBar)) timeBar.requestFocus();
+                return true;
+            }
+            if (key == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+        } else if (focused == timeBar && key == KeyEvent.KEYCODE_DPAD_DOWN) {
+            if (down && playButton != null) playButton.requestFocus();
+            return true;
         }
-        for (int i = 0; i < buttons.size(); i++) {
-            View v = buttons.get(i);
-            v.setNextFocusLeftId(buttons.get(Math.max(0, i - 1)).getId());
-            v.setNextFocusRightId(buttons.get(Math.min(buttons.size() - 1, i + 1)).getId());
-            v.setNextFocusDownId(v.getId());
-            if (timeBar != null) v.setNextFocusUpId(timeBar.getId());
-        }
-        if (timeBar != null && !buttons.isEmpty()) {
-            timeBar.setNextFocusDownId(playButton != null ? playButton.getId() : buttons.get(0).getId());
-        }
+        return false;
     }
 
     /** OK on the time bar plays/pauses (while scrubbing with left/right it confirms the new position). */
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (!enabled || timeBar == null || !timeBar.isFocused() || player == null || scrubbing) return false;
+        if (!enabled) return false;
+        if (navigate(event)) return true;
+        if (timeBar == null || !timeBar.isFocused() || player == null || scrubbing) return false;
         int key = event.getKeyCode();
         if (key != KeyEvent.KEYCODE_DPAD_CENTER && key != KeyEvent.KEYCODE_ENTER
                 && key != KeyEvent.KEYCODE_NUMPAD_ENTER && key != KeyEvent.KEYCODE_BUTTON_A) return false;
