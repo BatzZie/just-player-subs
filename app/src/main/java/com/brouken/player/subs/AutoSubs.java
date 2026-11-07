@@ -126,6 +126,10 @@ public final class AutoSubs implements Player.Listener {
     private int syncNextAttempt;
     private boolean syncProvisional;
 
+    // Sync reference from the MKV index (null = not available yet)
+    private boolean indexRequested;
+    private List<Long> indexRefs;
+
     private long attachedAt;
 
     private String sinceAttach() {
@@ -220,6 +224,8 @@ public final class AutoSubs implements Player.Listener {
         syncWanted = false;
         syncManual = false;
         syncProvisional = false;
+        indexRequested = false;
+        indexRefs = null;
     }
 
     /** Ask the player for an embedded text track up front (preferred languages, then English as sync reference). */
@@ -454,7 +460,7 @@ public final class AutoSubs implements Player.Listener {
         long duration = player.getDuration();
         scale = track.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFrameRate(),
                 duration == C.TIME_UNSET ? -1 : duration);
-        boolean userOffset = prefs.hasOffset(fileKey);
+        boolean userOffset = prefs.hasUserOffset(fileKey);
         offsetMs = prefs.offset(fileKey);
         Log.i(TAG, "Active: " + c + " cues=" + track.size() + " lastEnd=" + track.lastEndMs()
                 + " duration=" + duration + " videoFps=" + videoFrameRate() + " scale=" + scale
@@ -466,7 +472,11 @@ public final class AutoSubs implements Player.Listener {
         toast(msg);
 
         if (switching) sync.resetAgreement();
-        if (prefs.autoSync() && !userOffset) startSync(false);
+        if (prefs.autoSync() && !userOffset) {
+            // Playback based sync runs as a fallback; the index result (usually within a second) replaces it
+            startSync(false);
+            if (indexRefs != null) syncFromIndex(false);
+        }
     }
 
     private void deactivate() {
@@ -590,15 +600,79 @@ public final class AutoSubs implements Player.Listener {
 
     private void finishSync(long offset) {
         syncWanted = false;
-        long change = offset - prefs.offset(fileKey);
+        main.removeCallbacks(syncCheck);
+        long change = offset - offsetMs;
         Log.i(TAG, "AutoSync: final offset " + offset + " ms after " + sync.collected() + " reference cues, "
                 + ((SystemClock.elapsedRealtime() - syncStartedAt) / 1000) + " s");
         offsetMs = offset;
-        prefs.setOffset(fileKey, offsetMs);
+        prefs.setOffset(fileKey, offsetMs, false);
         render(true);
         if (syncManual || Math.abs(change) >= 300) {
             toast(activity.getString(R.string.autosubs_sync_done, formatOffset(offsetMs)));
         }
+    }
+
+    // ---------------------------------------------------------------- MKV index sync
+
+    /** Reads all embedded subtitle start times from the file's index (two small range requests). */
+    private void fetchIndex() {
+        indexRequested = true;
+        if (mediaUri == null || fileName == null || !fileName.toLowerCase(Locale.ROOT).endsWith(".mkv")) return;
+        final int gen = generation;
+        final String url = mediaUri.toString();
+        final String lang = prefs.language1();
+        executor.execute(() -> {
+            long t0 = SystemClock.elapsedRealtime();
+            try {
+                List<MkvIndex.SubtitleTrackInfo> tracks = MkvIndex.read(url);
+                MkvIndex.SubtitleTrackInfo best = null;
+                int bestScore = Integer.MIN_VALUE;
+                for (MkvIndex.SubtitleTrackInfo t : tracks) {
+                    Log.i(TAG, "MKV subtitle track " + t);
+                    if (t.forced || t.startsMs.size() < 20) continue;
+                    // Text tracks have one cue per line; bitmap (PGS) tracks also have "clear" events
+                    int score = (t.isText() ? 100 : 0)
+                            + (Languages.matches(t.language, lang) ? 10 : Languages.matches(t.language, "eng") ? 5 : 0)
+                            + Math.min(t.startsMs.size(), 3000) / 1000;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = t;
+                    }
+                }
+                final List<Long> refs = best == null ? null : best.startsMs;
+                Log.i(TAG, "MKV index read in " + (SystemClock.elapsedRealtime() - t0) + " ms, reference: " + best);
+                post(gen, () -> {
+                    indexRefs = refs;
+                    if (refs != null && active != null && syncWanted) syncFromIndex(syncManual);
+                });
+            } catch (Exception e) {
+                Log.i(TAG, "No MKV index: " + e);
+            }
+        });
+    }
+
+    private void syncFromIndex(boolean manual) {
+        if (activeTrack == null || indexRefs == null) return;
+        final int gen = generation;
+        final SubtitleTrack track = activeTrack;
+        final double s = scale;
+        final List<Long> refs = indexRefs;
+        if (!syncWanted) {
+            syncWanted = true;
+            syncStartedAt = SystemClock.elapsedRealtime();
+        }
+        syncManual = manual;
+        executor.execute(() -> {
+            long t0 = SystemClock.elapsedRealtime();
+            AutoSync.Result r = AutoSync.estimateAll(refs, track.startTimesMs(), s);
+            Log.i(TAG, "Index sync: " + (r == null ? "no clear match" : r.offsetMs + " ms") + " in "
+                    + (SystemClock.elapsedRealtime() - t0) + " ms");
+            post(gen, () -> {
+                if (activeTrack != track) return;
+                if (r != null) finishSync(r.offsetMs);
+                else if (manual) startSync(true); // fall back to watching along
+            });
+        });
     }
 
     // ---------------------------------------------------------------- Player.Listener
@@ -606,6 +680,7 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onPlaybackStateChanged(int state) {
         Log.i(TAG, "Player state " + state + " " + sinceAttach());
+        if (state == Player.STATE_READY && !indexRequested && owning) fetchIndex();
         if (state == Player.STATE_READY && pending != null) {
             activate(pending, pendingTrack, pendingAuto);
         }
@@ -749,7 +824,7 @@ public final class AutoSubs implements Player.Listener {
         if (overlay != null && overlay.getParent() instanceof FrameLayout) {
             ((FrameLayout) overlay.getParent()).removeView(overlay);
         }
-        prefs.setOffset(fileKey, offsetMs);
+        prefs.setOffset(fileKey, offsetMs, true);
         Log.i(TAG, "Offset saved: " + offsetMs + " ms");
     }
 
@@ -780,7 +855,8 @@ public final class AutoSubs implements Player.Listener {
             actions.add(this::enterTimingMode);
             labels.add(activity.getString(syncWanted ? R.string.autosubs_item_sync_running : R.string.autosubs_item_sync));
             actions.add(() -> {
-                if (!syncWanted) startSync(true);
+                if (indexRefs != null) syncFromIndex(true);
+                else if (!syncWanted) startSync(true);
             });
         }
         if (status == Status.ERROR || status == Status.NONE) {

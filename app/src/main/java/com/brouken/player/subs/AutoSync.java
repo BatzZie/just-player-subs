@@ -18,7 +18,8 @@ final class AutoSync {
     static final int FIRST_ATTEMPT = 8;
     private static final long MAX_OFFSET_MS = 120_000;
     private static final long STEP_MS = 100;
-    private static final long MATCH_MS = 500;
+    // About 60% of the lines of two independent subtitles start within 0.3 s of each other
+    private static final long MATCH_MS = 350;
 
     enum Level { PROVISIONAL, FINAL }
 
@@ -45,6 +46,19 @@ final class AutoSync {
             lastStart = timeMs;
         }
         lastEmpty = empty;
+    }
+
+    /** One-shot estimate from a complete list of reference start times (e.g. from the MKV index). */
+    static Result estimateAll(List<Long> refStartsMs, long[] subStartsMs, double scale) {
+        AutoSync s = new AutoSync();
+        List<Long> sorted = new ArrayList<>(refStartsMs);
+        Collections.sort(sorted);
+        for (long t : sorted) {
+            s.onCues(false, t);
+            s.onCues(true, t + 1);
+        }
+        Result r = s.estimate(subStartsMs, scale);
+        return r != null && r.level == Level.FINAL ? r : null;
     }
 
     /** A different online subtitle was chosen: earlier agreement doesn't count any more. */
@@ -96,9 +110,9 @@ final class AutoSync {
         else agreeing = 0;
         previousCoarse = coarse;
 
-        int needed = Math.max(6, (int) Math.ceil(refStarts.size() * 0.35));
+        int n = refStarts.size();
         Level level = null;
-        if (matched >= needed) {
+        if (matched >= Math.max(6, (int) Math.ceil(n * 0.35))) {
             if (matched >= second * 2.0 || (agreeing >= 3 && matched >= second * 1.5)) level = Level.FINAL;
             else if (matched >= second * 1.6 || (agreeing >= 2 && matched >= second * 1.3)) level = Level.PROVISIONAL;
         }

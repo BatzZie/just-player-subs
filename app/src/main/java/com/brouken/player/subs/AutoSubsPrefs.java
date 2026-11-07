@@ -82,17 +82,18 @@ final class AutoSubsPrefs {
         return fileKey == null ? 0 : files.getLong("offset:" + fileKey, 0);
     }
 
-    boolean hasOffset(String fileKey) {
-        return fileKey != null && files.contains("offset:" + fileKey);
+    /** True only for an offset the user set in timing mode; automatic results may be recomputed. */
+    boolean hasUserOffset(String fileKey) {
+        return fileKey != null && files.getBoolean("offsetUser:" + fileKey, false);
     }
 
-    void setOffset(String fileKey, long offsetMs) {
+    void setOffset(String fileKey, long offsetMs, boolean byUser) {
         if (fileKey == null) return;
-        files.edit().putLong("offset:" + fileKey, offsetMs).apply();
+        files.edit().putLong("offset:" + fileKey, offsetMs).putBoolean("offsetUser:" + fileKey, byUser).apply();
     }
 
     void removeOffset(String fileKey) {
-        if (fileKey != null) files.edit().remove("offset:" + fileKey).apply();
+        if (fileKey != null) files.edit().remove("offset:" + fileKey).remove("offsetUser:" + fileKey).apply();
     }
 
     String choice(String fileKey) {
