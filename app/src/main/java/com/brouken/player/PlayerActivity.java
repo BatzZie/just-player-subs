@@ -633,6 +633,7 @@ public class PlayerActivity extends Activity {
         controls.addView(exoSettings);
 
         exoBasicControls.addView(horizontalScrollView);
+        autoSubs.setSkin(com.brouken.player.subs.PlayerSkin.apply(this, playerView, titleView));
 
         if (Build.VERSION.SDK_INT > 23) {
             horizontalScrollView.setOnScrollChangeListener((view, i, i1, i2, i3) -> resetHideCallbacks());

@@ -149,6 +149,18 @@ public final class AutoSubs implements Player.Listener {
     private boolean bestFitChecked;
 
     private long attachedAt;
+    private PlayerSkin skin;
+
+    public void setSkin(PlayerSkin skin) {
+        this.skin = skin;
+    }
+
+    /** "MobLand · S2 E1" or "The Batman (2022)", from the file name; null if unknown. */
+    private String niceTitle() {
+        if (videoInfo == null || videoInfo.title == null) return null;
+        if (videoInfo.isEpisode()) return videoInfo.title + " · S" + videoInfo.season + " E" + videoInfo.episode;
+        return videoInfo.title + (videoInfo.year > 0 ? " (" + videoInfo.year + ")" : "");
+    }
 
     private String sinceAttach() {
         return "+" + (SystemClock.elapsedRealtime() - attachedAt) + " ms";
@@ -506,6 +518,7 @@ public final class AutoSubs implements Player.Listener {
         active = c;
         activeTrack = track;
         activeAuto = auto;
+        if (skin != null) skin.setSubtitleLanguage(c.lang);
         embeddedChosen = false;
         userOff = false;
         long duration = player.getDuration();
@@ -531,6 +544,7 @@ public final class AutoSubs implements Player.Listener {
     }
 
     private void deactivate() {
+        if (skin != null) skin.setSubtitleLanguage(null);
         active = null;
         activeTrack = null;
         syncWanted = false;
@@ -792,6 +806,7 @@ public final class AutoSubs implements Player.Listener {
         active = c;
         activeTrack = track;
         activeAuto = true;
+        if (skin != null) skin.setSubtitleLanguage(c.lang);
         scale = newScale;
         offsetMs = offset;
         prefs.setOffset(fileKey, offsetMs, false);
@@ -814,6 +829,7 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onTracksChanged(Tracks tracks) {
         Log.i(TAG, "Tracks known (" + tracks.getGroups().size() + " groups), text=" + selectedEmbeddedText() + " " + sinceAttach());
+        if (skin != null) skin.setTitle(niceTitle(), tracks);
         updateEmbeddedChoice();
     }
 
