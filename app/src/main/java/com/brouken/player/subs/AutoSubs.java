@@ -346,17 +346,10 @@ public final class AutoSubs implements Player.Listener {
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
         boolean syncing = reportToStremio(finished);
-        if (syncing) {
-            // Experiment: Stremio marks a video watched after an MX Player style result. Answer in VLC's format
-            // instead (Stremio parses that separately); our account write stays as a backup.
-            intent.setAction("org.videolan.vlc.player.result");
-            intent.removeExtra("position");
-            intent.removeExtra("duration");
-            intent.removeExtra("end_by");
-            Log.i(TAG, "Result sent in VLC format: extra_position=" + intent.getLongExtra("extra_position", -1)
-                    + " extra_duration=" + intent.getLongExtra("extra_duration", -1));
-        }
-        return true;
+        // Tested: with any result (MX or VLC format) Stremio sometimes marks the video watched and jumps to the
+        // next episode. Without a result it leaves the library alone; we write the progress to the account.
+        if (syncing) Log.i(TAG, "Result not sent to the caller (Stremio sync is active)");
+        return !syncing;
     }
 
     /**
@@ -875,6 +868,10 @@ public final class AutoSubs implements Player.Listener {
                         : t.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFps, duration);
                 // With the complete index the frame rate ratio can be measured instead of trusted
                 kotlin.Pair<Double, AutoSync.Result> measured = AutoSync.estimateWithScale(refs, t.startTimesMs(), sc);
+                if (measured == null) {
+                    // Dense or differently split reference: check whether all parts of the video agree
+                    measured = AutoSync.estimateConsistent(refs, t.startTimesMs(), sc);
+                }
                 AutoSync.Result r = measured == null ? null : measured.getSecond();
                 if (measured != null) sc = measured.getFirst();
                 Log.i(TAG, "Fit " + String.format(Locale.ROOT, "%.2f", r == null ? 0.0 : r.fit()) + " offset "

@@ -125,6 +125,81 @@ class AutoSync {
             return if (r != null && r.level == Level.FINAL) r else null
         }
 
+        private const val WINDOW_MS = 180_000L
+
+        /**
+         * For dense or differently split references (e.g. a BluRay track with many more, shorter lines) the overall
+         * winner can look weak although every part of the video agrees on the same offset. If the best offsets of
+         * the 3-minute windows agree, that is strong evidence (for an unrelated reference they scatter). A straight
+         * line through the window offsets also corrects a slow drift.
+         * @return scale and result, or null if the windows don't agree
+         */
+        @JvmStatic
+        fun estimateConsistent(refStartsMs: List<Long>, subStartsMs: LongArray, scale: Double): Pair<Double, Result>? {
+            val refs = refStartsMs.sorted()
+            if (refs.size < 40 || subStartsMs.isEmpty()) return null
+            val subs = DoubleArray(subStartsMs.size) { subStartsMs[it] * scale }.also { it.sort() }
+            fun matched(rs: List<Long>, s: DoubleArray, d: Double) =
+                rs.count { r -> val i = lowerBound(s, r - d - MATCH_MS); i < s.size && s[i] <= r - d + MATCH_MS }
+
+            val centers = ArrayList<Double>()
+            val offsets = ArrayList<Double>()
+            var start = refs.first()
+            while (start <= refs.last()) {
+                val w = refs.filter { it >= start && it < start + WINDOW_MS }
+                if (w.size >= 15) {
+                    var best = 0.0
+                    var bestCount = -1
+                    var d = -MAX_OFFSET_MS.toDouble()
+                    while (d <= MAX_OFFSET_MS) {
+                        val c = matched(w, subs, d)
+                        if (c > bestCount) { bestCount = c; best = d }
+                        d += STEP_MS
+                    }
+                    if (bestCount >= w.size * 0.25) {
+                        centers.add(start + WINDOW_MS / 2.0)
+                        offsets.add(best)
+                    }
+                }
+                start += WINDOW_MS
+            }
+            if (offsets.size < 4) return null
+            val median = offsets.sorted()[offsets.size / 2]
+            val agree = offsets.indices.filter { Math.abs(offsets[it] - median) <= 600 }
+            CoreLog.i("AutoSync: windows " + offsets.joinToString(" ") { it.toLong().toString() } + " -> ${agree.size}/${offsets.size} agree")
+            if (agree.size < maxOf(4, Math.ceil(offsets.size * 0.7).toInt())) return null
+
+            // Straight line offset(t) = a + b*t through the agreeing windows (slow drift = small scale error)
+            val n = agree.size.toDouble()
+            val mx = agree.sumOf { centers[it] } / n
+            val my = agree.sumOf { offsets[it] } / n
+            val sxx = agree.sumOf { (centers[it] - mx) * (centers[it] - mx) }
+            val b = if (sxx > 0) agree.sumOf { (centers[it] - mx) * (offsets[it] - my) } / sxx else 0.0
+            val slope = if (Math.abs(b) > 0.0001) b else 0.0 // ignore drift below 0.36 s per hour
+            val newScale = scale * (1 + slope)
+            val coarse = my - slope * mx
+
+            // Refine the offset with the corrected scale: median of nearby differences
+            val scaled = DoubleArray(subStartsMs.size) { subStartsMs[it] * newScale }.also { it.sort() }
+            val diffs = ArrayList<Double>()
+            for (r in refs) {
+                var bestDiff = Double.NaN
+                var i = lowerBound(scaled, r - coarse - MATCH_MS)
+                while (i < scaled.size && scaled[i] <= r - coarse + MATCH_MS) {
+                    val d = r - scaled[i]
+                    if (bestDiff.isNaN() || Math.abs(d - coarse) < Math.abs(bestDiff - coarse)) bestDiff = d
+                    i++
+                }
+                if (!bestDiff.isNaN()) diffs.add(bestDiff)
+            }
+            if (diffs.isEmpty()) return null
+            diffs.sort()
+            val offset = Math.round(diffs[diffs.size / 2])
+            val m = matched(refs, scaled, offset.toDouble())
+            CoreLog.i("AutoSync: consistent windows, offset $offset ms, drift ${"%.5f".format(slope)}, matched $m/${refs.size}")
+            return newScale to Result(offset, Level.FINAL, m, refs.size)
+        }
+
         /** Frame rate ratios that subtitles are commonly made for (relative to the video): 24 vs 23.976, PAL speed-up. */
         private val SCALES = doubleArrayOf(24.0 / 23.976, 23.976 / 24.0, 25.0 / 23.976, 23.976 / 25.0, 25.0 / 24.0, 24.0 / 25.0)
 

@@ -154,3 +154,39 @@ class FrameRateMeasureTest {
         assertEquals(1.0, measured.first)
     }
 }
+
+class ConsistentWindowsTest {
+    private val dir = java.io.File(System.getProperty("autosubs.testdata") ?: "")
+
+    @Test fun youngSheldonRealData() {
+        val f = java.io.File(dir, "youngsheldon_s06e17_sync.json")
+        if (!f.exists()) { println("SKIPPED: no Young Sheldon test data"); return }
+        val d = JsonUtil.parse(f.readText()).obj()!!
+        val refs = d["refs"].arr()!!.map { it.toString().toLong() }
+        val results = HashMap<String, Pair<Double, AutoSync.Result>?>()
+        for ((name, v) in d["subs"].obj()!!) {
+            val starts = v.obj()!!["starts"].arr()!!.map { it.toString().toLong() }.toLongArray()
+            assertNull(AutoSync.estimateAll(refs, starts, 1.0), "old method found nothing for $name")
+            results[name] = AutoSync.estimateConsistent(refs, starts, 1.0)
+            println("$name -> " + results[name]?.let { "offset ${it.second.offsetMs} scale ${"%.5f".format(it.first)} fit ${"%.2f".format(it.second.fit())}" })
+        }
+        val ntb = results.entries.first { it.key.contains("NTb") }.value
+        assertNotNull(ntb)
+        assertTrue(ntb.second.offsetMs in 900..1500, "NTb offset ${ntb.second.offsetMs}")
+        val cakes = results.entries.first { it.key.contains("cakes") }.value
+        assertTrue(cakes == null || cakes.second.fit() < ntb.second.fit(), "cakes must not win")
+    }
+
+    @Test fun unrelatedWindowsDoNotAgree() {
+        var found = 0
+        for (seed in 0 until 30) {
+            val r = Random(seed)
+            var t = 20_000L
+            val sub = LongArray(400) { t += 1000 + r.nextLong(6000); t }
+            var u = 20_000L
+            val ref = List(650) { u += 600 + r.nextLong(3500); u }
+            if (AutoSync.estimateConsistent(ref, sub, 1.0) != null) found++
+        }
+        assertTrue(found == 0, "$found of 30 unrelated references accepted")
+    }
+}
