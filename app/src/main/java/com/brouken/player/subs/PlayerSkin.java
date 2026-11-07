@@ -123,7 +123,7 @@ public final class PlayerSkin {
         }
         LinearLayout controls = playerView.findViewById(R.id.controls);
         if (controls != null) {
-            setGravity(controls, Gravity.BOTTOM | Gravity.START);
+            setGravity(controls, Gravity.CENTER_VERTICAL | Gravity.START);
             // "Open file" is rarely used with streams: move it to the end
             if (controls.getChildCount() > 1) {
                 View open = controls.getChildAt(0);
@@ -202,26 +202,54 @@ public final class PlayerSkin {
         ImageViewCompat.setImageTintList(b, new ColorStateList(
                 new int[][]{new int[]{android.R.attr.state_focused}, new int[]{}},
                 new int[]{iconOnAccent, Color.WHITE}));
-        ViewGroup.LayoutParams lp = b.getLayoutParams();
-        if (lp instanceof ViewGroup.MarginLayoutParams) {
-            ((ViewGroup.MarginLayoutParams) lp).setMargins(dp(2), 0, dp(2), 0);
-            b.setLayoutParams(lp);
-        }
+        // Media3's and Just Player's buttons have different sizes and paddings: make them all the same
+        int size = dp(52);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        lp.setMargins(dp(2), 0, dp(2), 0);
+        b.setLayoutParams(lp);
+        b.setPadding(dp(13), dp(13), dp(13), dp(13));
+        b.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
     }
 
     private void addTimeLabels(DefaultTimeBar bar) {
         if (!(bar.getParent() instanceof FrameLayout) || !(bar.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
         FrameLayout parent = (FrameLayout) bar.getParent();
         FrameLayout.LayoutParams barLp = (FrameLayout.LayoutParams) bar.getLayoutParams();
-        int side = dp(104);
+        final int side = dp(104);
         barLp.leftMargin = side;
         barLp.rightMargin = side;
         bar.setLayoutParams(barLp);
+        // Just Player resets the time bar margins whenever the window insets change: put ours back
+        bar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (!(v.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+            if (p.leftMargin != side || p.rightMargin != side) {
+                p.leftMargin = side;
+                p.rightMargin = side;
+                v.post(() -> v.setLayoutParams(p));
+            }
+            alignTimeLabels(p);
+        });
         timeLeft = timeLabel(Gravity.END);
         timeRight = timeLabel(Gravity.START);
         int index = parent.indexOfChild(bar) + 1;
         parent.addView(timeLeft, index, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.START));
         parent.addView(timeRight, index + 1, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.END));
+    }
+
+    /** Keep the time labels at the same height as the time bar (its bottom margin changes with the insets). */
+    private void alignTimeLabels(FrameLayout.LayoutParams barLp) {
+        for (TextView t : new TextView[]{timeLeft, timeRight}) {
+            if (t == null || !(t.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) t.getLayoutParams();
+            int bottom = barLp.bottomMargin - dp(3);
+            if (lp.bottomMargin != bottom || lp.height != barLp.height) {
+                lp.bottomMargin = bottom;
+                lp.height = barLp.height;
+                t.post(() -> t.setLayoutParams(lp));
+            }
+        }
     }
 
     private TextView timeLabel(int textGravity) {
