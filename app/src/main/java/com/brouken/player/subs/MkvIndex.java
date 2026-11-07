@@ -65,18 +65,23 @@ public final class MkvIndex {
 
     /** @return subtitle tracks with their cue start times, or an empty list if the file has no usable index */
     public static List<SubtitleTrackInfo> read(String url) throws IOException {
-        byte[] head = range(url, 0, HEAD_BYTES);
+        // The header (SeekHead, Info, Tracks) is normally within the first few KB
+        byte[] head = range(url, 0, HEAD_BYTES, 16 * 1024);
         Parser p = new Parser(head);
         // EBML header, then Segment
         long segmentData = -1;
-        while (p.pos < head.length) {
-            int id = p.readId();
-            long size = p.readSize();
-            if (id == ID_SEGMENT) {
-                segmentData = p.pos;
-                break;
+        try {
+            while (p.pos < head.length) {
+                int id = p.readId();
+                long size = p.readSize();
+                if (id == ID_SEGMENT) {
+                    segmentData = p.pos;
+                    break;
+                }
+                p.pos += size;
             }
-            p.pos += size;
+        } catch (RuntimeException e) {
+            return new ArrayList<>(); // not a Matroska file
         }
         if (segmentData < 0) return new ArrayList<>();
 
@@ -84,6 +89,8 @@ public final class MkvIndex {
         long cuesPosition = -1;
         Map<Integer, SubtitleTrackInfo> tracks = new HashMap<>();
         p.pos = (int) segmentData;
+        // A partially received header is fine: use what was parsed until the data ran out
+        try {
         while (p.pos < head.length) {
             int id = p.readId();
             long size = p.readSize();
@@ -126,18 +133,23 @@ public final class MkvIndex {
             }
             p.pos = (int) (start + size);
         }
+        } catch (RuntimeException e) {
+            android.util.Log.i(AutoSubs.TAG, "MKV index: header parsed partially (" + head.length + " bytes)");
+        }
+        android.util.Log.i(AutoSubs.TAG, "MKV index: header " + head.length + " bytes, " + tracks.size()
+                + " subtitle tracks, cues at " + cuesPosition);
         if (cuesPosition < 0 || tracks.isEmpty()) return new ArrayList<>(tracks.values());
 
         // Cues element: read its header first to learn the size, usually everything fits in one request
         long cuesStart = segmentData + cuesPosition;
-        byte[] cuesHead = range(url, cuesStart, 64 * 1024);
+        byte[] cuesHead = range(url, cuesStart, 64 * 1024, 64);
         Parser c = new Parser(cuesHead);
         if (c.readId() != ID_CUES) return new ArrayList<>(tracks.values());
         long cuesSize = c.readSize();
         int headerLen = c.pos;
         if (cuesSize < 0 || cuesSize > MAX_CUES_BYTES) return new ArrayList<>(tracks.values());
         byte[] cues = cuesSize + headerLen <= cuesHead.length ? cuesHead
-                : range(url, cuesStart, (int) (cuesSize + headerLen));
+                : range(url, cuesStart, (int) (cuesSize + headerLen), (int) (cuesSize + headerLen));
         Parser q = new Parser(cues);
         final long scale = timecodeScale;
         q.children(headerLen, Math.min(cuesSize, cues.length - headerLen), (id, start, size) -> {
@@ -161,23 +173,47 @@ public final class MkvIndex {
         return new ArrayList<>(tracks.values());
     }
 
-    private static byte[] range(String url, long start, int length) throws IOException {
-        Request req = new Request.Builder().url(url)
-                .header("User-Agent", Net.userAgent())
-                .header("Range", "bytes=" + start + "-" + (start + length - 1))
-                .build();
-        try (okhttp3.Response r = Net.client().newCall(req).execute()) {
-            if (r.code() != 206) throw new IOException("Range not supported (HTTP " + r.code() + ")");
+    /**
+     * Range request with retries. Debrid servers sometimes close a connection early (OkHttp: "unexpected end of
+     * stream"), especially while the player is opening its own connections; whatever arrived is kept.
+     */
+    private static byte[] range(String url, long start, int length, int minUseful) throws IOException {
+        IOException last = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
             byte[] out = new byte[length];
             int total = 0;
-            java.io.InputStream in = r.body().byteStream();
-            int n;
-            while (total < length && (n = in.read(out, total, length - total)) != -1) total += n;
-            if (total == length) return out;
-            byte[] shorter = new byte[total];
-            System.arraycopy(out, 0, shorter, 0, total);
-            return shorter;
+            Request req = new Request.Builder().url(url)
+                    .header("User-Agent", Net.userAgent())
+                    .header("Accept-Encoding", "identity")
+                    .header("Range", "bytes=" + start + "-" + (start + length - 1))
+                    .build();
+            try (okhttp3.Response r = Net.client().newCall(req).execute()) {
+                if (r.code() != 206) throw new IOException("Range not supported (HTTP " + r.code() + ")");
+                java.io.InputStream in = r.body().byteStream();
+                int n;
+                while (total < length && (n = in.read(out, total, length - total)) != -1) total += n;
+            } catch (IOException e) {
+                last = e;
+                android.util.Log.i(AutoSubs.TAG, "MKV index: range " + start + "+" + length + " attempt " + attempt
+                        + " got " + total + " bytes: " + e);
+            }
+            boolean failed = last != null && total < minUseful;
+            if (!failed) {
+                if (total == length) return out;
+                byte[] shorter = new byte[total];
+                System.arraycopy(out, 0, shorter, 0, total);
+                return shorter;
+            }
+            if (attempt < 3) {
+                try {
+                    Thread.sleep(400L * attempt);
+                } catch (InterruptedException e) {
+                    throw last;
+                }
+                last = null;
+            }
         }
+        throw last != null ? last : new IOException("range failed");
     }
 
     /** Minimal EBML reader. Unknown sizes are returned as -1. */
