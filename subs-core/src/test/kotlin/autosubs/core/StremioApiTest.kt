@@ -58,3 +58,17 @@ class StremioFinishedRepeatTest {
         assertEquals(0, again["state"].obj()!!.long("timeOffset", -1))
     }
 }
+
+class StremioPositionOnlyTest {
+    @Test fun positionWriteKeepsWatchedBookkeeping() {
+        val existing = JsonUtil.parse("""{"_id":"tt1","type":"series","state":{"video_id":"tt1:1:3","timeOffset":5,
+            "watched":"tt1:1:2:2:eJxjAAAAAgAB","flaggedWatched":1,"timesWatched":4}}""").obj()
+        val item = StremioApi.withProgress(existing, "tt1", "series", "tt1:1:4", null, null, 120_000, 2_400_000, 60_000,
+            false, "2026-11-07T22:00:00.000Z", false)
+        val s = item["state"].obj()!!
+        assertEquals("tt1:1:2:2:eJxjAAAAAgAB", s.str("watched"))
+        assertEquals(4, s.long("timesWatched", -1))
+        assertEquals(120_000, s.long("timeOffset", -1))
+        assertEquals("tt1:1:4", s.str("video_id"))
+    }
+}

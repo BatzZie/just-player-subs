@@ -422,12 +422,17 @@ public final class AutoSubs implements Player.Listener {
         if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
         final boolean done = finished || pos >= dur * FINISHED;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
+        if (done) return false; // handled by the completion result (Stremio is leading)
+        if (watched < 60_000) {
+            Log.i(TAG, "Stremio: watched only " + (watched / 1000) + " s, position not written");
+            return true;
+        }
         final long token = stremioSyncToken.incrementAndGet();
         Thread t = new Thread(() -> {
             autosubs.core.StremioApi api = new autosubs.core.StremioApi();
-            // Also a finished video is checked again: Stremio writes back its old copy when it comes to the front.
-            // Only the first write counts it as watched once more.
             long started = System.currentTimeMillis();
+            // Stremio writes back its own (old) copy when it comes to the front: check and repair for 2 minutes,
+            // but only while the library still points to this video.
             for (long at : new long[]{0, 10_000, 30_000, 60_000, 120_000}) {
                 try {
                     long wait = started + at - System.currentTimeMillis();
@@ -436,10 +441,18 @@ public final class AutoSubs implements Player.Listener {
                         Log.i(TAG, "Stremio sync for " + id + " at " + (pos / 1000) + "s superseded");
                         return;
                     }
-                    if (at > 0) Log.i(TAG, "Stremio state after " + (at / 1000) + "s: " + api.describe(authKey, id));
-                    boolean isNew = api.reportProgress(authKey, id, pos, dur, at == 0 ? watched : 0, done, at == 0);
-                    Log.i(TAG, "Stremio progress written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
-                            + "s" + (done ? " (finished)" : "") + (isNew ? " (new item)" : ""));
+                    if (at > 0) {
+                        autosubs.core.StremioApi.Progress p = api.readProgress(authKey, id);
+                        if (p == null || !id.videoId().equals(p.videoId)) {
+                            Log.i(TAG, "Stremio library moved on to " + (p == null ? "-" : p.videoId) + ", stop repairing");
+                            return;
+                        }
+                        if (Math.abs(p.offsetMs - pos) < 1000) continue;
+                        Log.i(TAG, "Stremio wrote " + (p.offsetMs / 1000) + "s, repairing to " + (pos / 1000) + "s");
+                    }
+                    boolean isNew = api.writePosition(authKey, id, pos, dur, at == 0 ? watched : 0);
+                    Log.i(TAG, "Stremio position written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
+                            + "s" + (isNew ? " (new item)" : ""));
                 } catch (InterruptedException e) {
                     return;
                 } catch (Exception e) {
@@ -461,15 +474,39 @@ public final class AutoSubs implements Player.Listener {
     private void checkResume() {
         if (resumeChecked || mediaId == null || player == null || startPositionMs < 0) return;
         resumeChecked = true;
-        long saved = prefs.resume(mediaId.videoId());
-        long now = player.getCurrentPosition();
-        // Stremio may send 0 (its stale copy) right after a stop; trust our own stop if it is recent
-        if (startPositionMs == 0 && !prefs.resumeIsRecent(mediaId.videoId(), 12 * 3600_000L)) return;
-        if (saved > startPositionMs + 10_000 && now < startPositionMs + 15_000) {
-            Log.i(TAG, "Resume: caller sent " + (startPositionMs / 1000) + "s, last stop was " + (saved / 1000) + "s");
-            player.seekTo(saved);
-            toast(activity.getString(R.string.autosubs_resumed, formatTime(saved)));
+        final MediaId id = mediaId;
+        final long sent = startPositionMs;
+        final String authKey = prefs.stremioAuthKeyForSync();
+        if (authKey == null) {
+            // Not logged in: only correct an older non-zero position (0 can be a deliberate start from the beginning)
+            long saved = prefs.resume(id.videoId());
+            if (sent > 0) seekToResume(saved, sent);
+            return;
         }
+        // Logged in: the account is leading. If you marked it unwatched in Stremio, it says 0 there and we respect that.
+        final int gen = generation;
+        executor.execute(() -> {
+            try {
+                autosubs.core.StremioApi.Progress p = new autosubs.core.StremioApi().readProgress(authKey, id);
+                if (p == null || !id.videoId().equals(p.videoId)) return;
+                final long offset = p.offsetMs;
+                final long dur = p.durationMs;
+                Log.i(TAG, "Resume: caller sent " + (sent / 1000) + "s, account says " + (offset / 1000) + "s");
+                if (dur > 0 && offset >= dur * FINISHED) return;
+                post(gen, () -> seekToResume(offset, sent));
+            } catch (Exception e) {
+                Log.i(TAG, "Resume check failed: " + e.getMessage());
+            }
+        });
+    }
+
+    /** Seeks to a later position than the caller sent, if playback is still near that start. */
+    private void seekToResume(long target, long sent) {
+        if (player == null || target <= sent + 10_000) return;
+        if (player.getCurrentPosition() > sent + 15_000) return; // user already moved on
+        Log.i(TAG, "Resume at " + (target / 1000) + "s (caller sent " + (sent / 1000) + "s)");
+        player.seekTo(target);
+        toast(activity.getString(R.string.autosubs_resumed, formatTime(target)));
     }
 
     private static String formatTime(long ms) {

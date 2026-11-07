@@ -139,16 +139,6 @@ final class AutoSubsPrefs {
         }
     }
 
-    boolean resumeIsRecent(String videoId, long maxAgeMs) {
-        String v = videoId == null ? null : files.getString("resume:" + videoId, null);
-        if (v == null) return false;
-        try {
-            return System.currentTimeMillis() - Long.parseLong(v.split(",")[1]) <= maxAgeMs;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     String choice(String fileKey) {
         return fileKey == null ? null : files.getString("choice:" + fileKey, null);
     }

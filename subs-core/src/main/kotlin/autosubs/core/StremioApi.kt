@@ -84,6 +84,30 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         return existing == null
     }
 
+    /** Watch position in the library for one video. */
+    class Progress(@JvmField val videoId: String, @JvmField val offsetMs: Long, @JvmField val durationMs: Long)
+
+    /** @return the library's progress for this item (whatever video it points to), or null if not in the library */
+    @Throws(IOException::class)
+    fun readProgress(authKey: String, id: MediaId): Progress? {
+        val state = getLibraryItem(authKey, id.imdbId)?.get("state").obj() ?: return null
+        return Progress(state.str("video_id"), state.long("timeOffset", 0), state.long("duration", 0))
+    }
+
+    /**
+     * Writes only the position of one video: video_id, timeOffset, duration, lastWatched, time watched.
+     * Stremio's own watched bookkeeping (the watched bitfield, flaggedWatched, timesWatched) is never touched.
+     * @return true if the item was new in the library
+     */
+    @Throws(IOException::class)
+    fun writePosition(authKey: String, id: MediaId, positionMs: Long, durationMs: Long, watchedMs: Long): Boolean {
+        val existing = getLibraryItem(authKey, id.imdbId)
+        val meta = if (existing == null) fullMeta(id.type(), id.imdbId) else null
+        putLibraryItem(authKey, withProgress(existing, id.imdbId, id.type(), id.videoId(), meta?.name, meta?.poster,
+            positionMs, durationMs, watchedMs, false, now(), false))
+        return existing == null
+    }
+
     /** Short description of the library state of a video, for logging ("offset=688s watched=false mtime=..."). */
     @Throws(IOException::class)
     fun describe(authKey: String, id: MediaId): String {
