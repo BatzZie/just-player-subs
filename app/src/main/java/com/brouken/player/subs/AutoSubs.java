@@ -153,6 +153,7 @@ public final class AutoSubs implements Player.Listener {
     private boolean bestFitChecked;
 
     private long attachedAt;
+    private final LaunchTransition launchTransition;
     private PlayerSkin skin;
 
     public void setSkin(PlayerSkin skin) {
@@ -178,6 +179,7 @@ public final class AutoSubs implements Player.Listener {
     public AutoSubs(Activity activity) {
         this.activity = activity;
         this.prefs = new AutoSubsPrefs(activity);
+        this.launchTransition = LaunchTransition.begin(activity);
         Net.init();
         CoreLog.setLogger((level, message) -> {
             if (level == 'W') Log.w(TAG, message);
@@ -195,6 +197,8 @@ public final class AutoSubs implements Player.Listener {
         this.playerView = playerView;
         attachedAt = SystemClock.elapsedRealtime();
         player.addListener(this);
+        player.removeListener(launchTransition);
+        player.addListener(launchTransition);
         if (skin != null) skin.onPlayerStarted(player);
 
         if (uri == null || !uri.equals(mediaUri)) {
@@ -230,7 +234,9 @@ public final class AutoSubs implements Player.Listener {
         clearCues();
         if (player != null) {
             player.removeListener(this);
+            player.removeListener(launchTransition);
         }
+        launchTransition.reveal("player released");
         player = null;
     }
 

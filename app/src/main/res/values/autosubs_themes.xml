@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Player screen. From Android 11 it starts translucent (see values-v30) so the calling app's loading screen
+         (Stremio) stays visible until the first video frame; LaunchTransition makes it opaque again. -->
+    <style name="Theme.Player.Launch" parent="Theme.Player" />
+</resources>

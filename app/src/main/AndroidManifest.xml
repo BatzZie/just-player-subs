@@ -45,6 +45,7 @@
         tools:targetApi="n">
         <activity
             android:name=".PlayerActivity"
+            android:theme="@style/Theme.Player.Launch"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|touchscreen"
             android:exported="true"
             android:launchMode="singleTask"
