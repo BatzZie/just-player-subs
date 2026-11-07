@@ -68,7 +68,7 @@ public final class PlayerSkin {
         View background = playerView.findViewById(R.id.exo_controls_background);
         if (background != null) {
             GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{0xB3000000, 0x00000000, 0x00000000, 0x00000000, 0xD9000000});
+                    new int[]{0xB0000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x8C000000, 0xF0000000});
             background.setBackground(g);
         }
         View bottomBar = playerView.findViewById(R.id.exo_bottom_bar);
@@ -89,6 +89,8 @@ public final class PlayerSkin {
             row.removeView(scroll);
             row.addView(scroll, 0);
             row.setPadding(dp(16), row.getPaddingTop(), row.getPaddingRight(), row.getPaddingBottom());
+            // Just Player keeps 170sp free on the left for the time; the time is on the right now
+            scroll.setPaddingRelative(0, scroll.getPaddingTop(), dp(170), scroll.getPaddingBottom());
         }
         LinearLayout controls = playerView.findViewById(R.id.controls);
         if (controls != null) {
