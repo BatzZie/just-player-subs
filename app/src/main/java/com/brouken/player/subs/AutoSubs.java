@@ -251,6 +251,20 @@ public final class AutoSubs implements Player.Listener {
         return sb.toString();
     }
 
+    /**
+     * Just Player probes ~10 URLs next to a network video (name.srt, name.en.srt, ...). Debrid resolvers like
+     * Torrentio redirect every such URL to the video itself, so each probe opens a full download of the movie and
+     * Real-Debrid's connection limit stalls the real playback for 10-20 s. AutoSubs searches online instead.
+     */
+    public boolean replacesSidecarSearch(Uri uri) {
+        if (uri == null || !prefs.isEnabled()) return false;
+        if (activity.getIntent() != null && activity.getIntent().getBooleanExtra("autosubs_disable", false)) return false;
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        boolean skip = scheme.equals("http") || scheme.equals("https");
+        if (skip) Log.i(TAG, "Skipping sidecar subtitle probes for stream");
+        return skip;
+    }
+
     // ---------------------------------------------------------------- search
 
     private List<SubtitleSource> sources() {

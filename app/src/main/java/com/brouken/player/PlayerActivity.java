@@ -1981,6 +1981,7 @@ public class PlayerActivity extends Activity {
             return;
 
         if (Utils.isSupportedNetworkUri(mPrefs.mediaUri) && Utils.isProgressiveContainerUri(mPrefs.mediaUri)) {
+            if (autoSubs.replacesSidecarSearch(mPrefs.mediaUri)) return;
             SubtitleUtils.clearCache(this);
             if (SubtitleFinder.isUriCompatible(mPrefs.mediaUri)) {
                 subtitleFinder = new SubtitleFinder(PlayerActivity.this, mPrefs.mediaUri);
