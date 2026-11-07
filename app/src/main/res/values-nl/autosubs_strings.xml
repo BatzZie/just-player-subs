@@ -67,4 +67,5 @@
     <string name="stremio_login_failed">Inloggen mislukt: %s</string>
     <string name="stremio_sync">Kijkvoortgang naar Stremio sturen</string>
     <string name="stremio_sync_summary">Bij stoppen wordt de positie in je Stremio-bibliotheek opgeslagen</string>
+    <string name="stremio_next">Volgende</string>
 </resources>

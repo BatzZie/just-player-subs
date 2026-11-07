@@ -175,49 +175,71 @@ public final class AutoSubsSettings {
         add(category, sync);
     }
 
+    /**
+     * Login in two small steps (e-mail, then password): with a remote control it is hard or impossible to move
+     * between two input fields while the on-screen keyboard is open.
+     */
     private static void showStremioLogin(PreferenceFragmentCompat fragment, AutoSubsPrefs prefs, Runnable done) {
         android.app.Activity activity = fragment.requireActivity();
+        askText(activity, R.string.stremio_email, prefs.stremioEmail(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, R.string.stremio_next,
+                email -> askText(activity, R.string.stremio_password, "",
+                        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, R.string.stremio_login,
+                        password -> login(activity, prefs, email.trim(), password, done)));
+    }
+
+    private interface TextCallback {
+        void onText(String text);
+    }
+
+    /** One input field per dialog; the keyboard's Next/Done key confirms. */
+    private static void askText(android.app.Activity activity, int title, String initial, int inputType, int button,
+                                TextCallback callback) {
         int pad = Math.round(20 * activity.getResources().getDisplayMetrics().density);
-        android.widget.LinearLayout form = new android.widget.LinearLayout(activity);
-        form.setOrientation(android.widget.LinearLayout.VERTICAL);
-        form.setPadding(pad, pad / 2, pad, 0);
-        android.widget.EditText email = new android.widget.EditText(activity);
-        email.setHint(R.string.stremio_email);
-        email.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        email.setSingleLine(true);
-        android.widget.EditText password = new android.widget.EditText(activity);
-        password.setHint(R.string.stremio_password);
-        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setSingleLine(true);
-        form.addView(email);
-        form.addView(password);
-        new androidx.appcompat.app.AlertDialog.Builder(activity)
-                .setTitle(R.string.stremio_account)
+        android.widget.FrameLayout box = new android.widget.FrameLayout(activity);
+        box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.EditText input = new android.widget.EditText(activity);
+        input.setInputType(inputType);
+        input.setSingleLine(true);
+        input.setText(initial);
+        input.setSelection(input.getText().length());
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        box.addView(input);
+        androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(activity)
+                .setTitle(title)
                 .setMessage(R.string.stremio_login_message)
-                .setView(form)
-                .setPositiveButton(R.string.stremio_login, (d, w) -> {
-                    String e = email.getText().toString().trim();
-                    String pw = password.getText().toString();
-                    new Thread(() -> {
-                        String error = null;
-                        try {
-                            autosubs.core.StremioApi.Login login = new autosubs.core.StremioApi().login(e, pw);
-                            prefs.setStremioLogin(login.authKey, login.email);
-                        } catch (Exception ex) {
-                            error = ex.getMessage();
-                        }
-                        final String err = error;
-                        activity.runOnUiThread(() -> {
-                            done.run();
-                            android.widget.Toast.makeText(activity, err == null
-                                    ? activity.getString(R.string.stremio_logged_in, prefs.stremioEmail())
-                                    : activity.getString(R.string.stremio_login_failed, err),
-                                    android.widget.Toast.LENGTH_LONG).show();
-                        });
-                    }, "StremioLogin").start();
-                })
+                .setView(box)
+                .setPositiveButton(button, (d, w) -> callback.onText(input.getText().toString()))
                 .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                .create();
+        input.setOnEditorActionListener((v, actionId, event) -> {
+            dialog.dismiss();
+            callback.onText(input.getText().toString());
+            return true;
+        });
+        dialog.setOnShowListener(d -> input.requestFocus());
+        dialog.show();
+    }
+
+    private static void login(android.app.Activity activity, AutoSubsPrefs prefs, String email, String password, Runnable done) {
+        if (email.isEmpty() || password.isEmpty()) return;
+        new Thread(() -> {
+            String error = null;
+            try {
+                autosubs.core.StremioApi.Login login = new autosubs.core.StremioApi().login(email, password);
+                prefs.setStremioLogin(login.authKey, login.email);
+            } catch (Exception ex) {
+                error = ex.getMessage();
+            }
+            final String err = error;
+            activity.runOnUiThread(() -> {
+                done.run();
+                android.widget.Toast.makeText(activity, err == null
+                        ? activity.getString(R.string.stremio_logged_in, prefs.stremioEmail())
+                        : activity.getString(R.string.stremio_login_failed, err),
+                        android.widget.Toast.LENGTH_LONG).show();
+            });
+        }, "StremioLogin").start();
     }
 
     /** Separate section for the look of the player controls (PlayerSkin). */
