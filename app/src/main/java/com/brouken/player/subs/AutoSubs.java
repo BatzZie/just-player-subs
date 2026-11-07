@@ -327,7 +327,11 @@ public final class AutoSubs implements Player.Listener {
      * player still exists; after onStop it is already released, so use the last known values. Also adds the VLC
      * keys, so callers that expect those get the position too.
      */
-    public void completeResult(android.content.Intent intent, boolean finished) {
+    /**
+     * @return false when the result should not be sent: with Stremio sync active we write the progress to the
+     * account ourselves, and a result from an unknown player only makes Stremio mark the video as watched.
+     */
+    public boolean completeResult(android.content.Intent intent, boolean finished) {
         rememberPosition();
         if (!finished) {
             if (!intent.hasExtra("position") && lastPositionMs >= 0) intent.putExtra("position", (int) lastPositionMs);
@@ -337,7 +341,9 @@ public final class AutoSubs implements Player.Listener {
         if (intent.hasExtra("duration")) intent.putExtra("extra_duration", (long) intent.getIntExtra("duration", 0));
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
-        reportToStremio(finished);
+        boolean syncing = reportToStremio(finished);
+        if (syncing) Log.i(TAG, "Result not sent to the caller (Stremio sync is active)");
+        return !syncing;
     }
 
     /**
@@ -345,21 +351,24 @@ public final class AutoSubs implements Player.Listener {
      * ignores the result of external players it doesn't know and can overwrite the library when it comes back to
      * the front, so the write is repeated a few times.
      */
-    private void reportToStremio(boolean finished) {
+    private boolean reportToStremio(boolean finished) {
         final String authKey = prefs.stremioAuthKeyForSync();
         final MediaId id = mediaId;
         final long pos = lastPositionMs;
         final long dur = lastDurationMs;
-        if (authKey == null || id == null || dur <= 0 || pos < 0) return;
+        if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
         final boolean done = finished || pos >= dur * 0.95;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
         Thread t = new Thread(() -> {
             autosubs.core.StremioApi api = new autosubs.core.StremioApi();
             // A finished video is written once (repeating would count it as watched again)
-            for (long delay : done ? new long[]{0} : new long[]{0, 10_000, 30_000}) {
+            long started = System.currentTimeMillis();
+            for (long at : done ? new long[]{0} : new long[]{0, 10_000, 30_000, 60_000, 120_000}) {
                 try {
-                    if (delay > 0) Thread.sleep(delay);
-                    boolean isNew = api.reportProgress(authKey, id, pos, dur, delay == 0 ? watched : 0, done);
+                    long wait = started + at - System.currentTimeMillis();
+                    if (wait > 0) Thread.sleep(wait);
+                    if (at > 0) Log.i(TAG, "Stremio state after " + (at / 1000) + "s: " + api.describe(authKey, id));
+                    boolean isNew = api.reportProgress(authKey, id, pos, dur, at == 0 ? watched : 0, done);
                     Log.i(TAG, "Stremio progress written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
                             + "s" + (done ? " (finished)" : "") + (isNew ? " (new item)" : ""));
                 } catch (InterruptedException e) {
@@ -370,6 +379,7 @@ public final class AutoSubs implements Player.Listener {
             }
         }, "StremioSync");
         t.start();
+        return true;
     }
 
     // ---------------------------------------------------------------- search

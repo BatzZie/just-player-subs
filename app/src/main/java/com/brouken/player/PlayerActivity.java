@@ -788,8 +788,8 @@ public class PlayerActivity extends Activity {
                     }
                 }
             }
-            autoSubs.completeResult(intent, playbackFinished);
-            setResult(Activity.RESULT_OK, intent);
+            if (autoSubs.completeResult(intent, playbackFinished)) setResult(Activity.RESULT_OK, intent);
+            else setResult(Activity.RESULT_CANCELED);
         }
 
         super.finish();

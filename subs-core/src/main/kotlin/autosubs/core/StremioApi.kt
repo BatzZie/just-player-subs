@@ -81,6 +81,18 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         return existing == null
     }
 
+    /** Short description of the library state of a video, for logging ("offset=688s watched=false mtime=..."). */
+    @Throws(IOException::class)
+    fun describe(authKey: String, id: MediaId): String {
+        val item = getLibraryItem(authKey, id.imdbId) ?: return "not in library"
+        val state = item["state"].obj() ?: return "no state"
+        val meta = if (id.isSeries()) fullMeta(id.type(), id.imdbId) else null
+        val watched = if (meta != null) WatchedBitField.parse(state.str("watched").ifEmpty { null },
+            WatchedBitField.sortedVideoIds(meta.videos)).get(id.videoId()) else state.long("flaggedWatched", 0) > 0
+        return "video=" + state.str("video_id") + " offset=" + state.long("timeOffset", -1) / 1000 + "s watched=" + watched +
+            " mtime=" + item.str("_mtime")
+    }
+
     private fun call(method: String, body: JsonObject): JsonObject {
         val response = post(method, body)
         return response["result"].obj() ?: throw IOException("Stremio $method: no result")
