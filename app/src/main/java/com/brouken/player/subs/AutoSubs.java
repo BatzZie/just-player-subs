@@ -126,6 +126,17 @@ public final class AutoSubs implements Player.Listener {
     private int syncNextAttempt;
     private boolean syncProvisional;
 
+    private long attachedAt;
+
+    private String sinceAttach() {
+        return "+" + (SystemClock.elapsedRealtime() - attachedAt) + " ms";
+    }
+
+    @Override
+    public void onIsLoadingChanged(boolean isLoading) {
+        Log.d(TAG, "Player loading=" + isLoading + " " + sinceAttach());
+    }
+
     public AutoSubs(Activity activity) {
         this.activity = activity;
         this.prefs = new AutoSubsPrefs(activity);
@@ -139,7 +150,15 @@ public final class AutoSubs implements Player.Listener {
         }
         this.player = player;
         this.playerView = playerView;
+        attachedAt = SystemClock.elapsedRealtime();
         player.addListener(this);
+        // Test switch for A/B start-up measurements: adb ... --ez autosubs_disable true
+        if (activity.getIntent() != null && activity.getIntent().getBooleanExtra("autosubs_disable", false)) {
+            Log.i(TAG, "Disabled by intent extra");
+            mediaUri = uri;
+            status = Status.DISABLED;
+            return;
+        }
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
@@ -572,6 +591,7 @@ public final class AutoSubs implements Player.Listener {
 
     @Override
     public void onPlaybackStateChanged(int state) {
+        Log.i(TAG, "Player state " + state + " " + sinceAttach());
         if (state == Player.STATE_READY && pending != null) {
             activate(pending, pendingTrack, pendingAuto);
         }
@@ -579,6 +599,7 @@ public final class AutoSubs implements Player.Listener {
 
     @Override
     public void onTracksChanged(Tracks tracks) {
+        Log.i(TAG, "Tracks known (" + tracks.getGroups().size() + " groups), text=" + selectedEmbeddedText() + " " + sinceAttach());
         updateEmbeddedChoice();
     }
 
