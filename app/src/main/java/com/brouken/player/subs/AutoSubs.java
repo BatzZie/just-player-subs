@@ -440,11 +440,12 @@ public final class AutoSubs implements Player.Listener {
     private void startSearch() {
         if (mediaUri == null) return;
         String scheme = mediaUri.getScheme() == null ? "" : mediaUri.getScheme().toLowerCase(Locale.ROOT);
-        if (!scheme.equals("http") && !scheme.equals("https")) {
+        final boolean local = LocalFile.isLocal(mediaUri);
+        if (!scheme.equals("http") && !scheme.equals("https") && !local) {
             status = Status.UNSUPPORTED;
             return;
         }
-        fileName = mediaUri.getLastPathSegment();
+        fileName = local ? LocalFile.displayName(activity, mediaUri) : mediaUri.getLastPathSegment();
         videoInfo = ReleaseNameParser.parse(fileName);
         fileKey = "name:" + fileName;
         Log.i(TAG, "Media: " + Redact.url(mediaUri));
@@ -463,9 +464,22 @@ public final class AutoSubs implements Player.Listener {
         final List<SubtitleSource> sources = sources();
         final long started = SystemClock.elapsedRealtime();
         // No file hash: it needs extra requests on the same debrid link while the player is starting up
+        final Uri uriForHash = mediaUri;
         executor.execute(() -> {
             try {
-                MediaId id = MediaIdentifier.fromUrl(url, info);
+                // Local files: the OpenSubtitles hash is cheap and often finds the subtitle made for this exact file
+                String hash = null;
+                long size = -1;
+                if (local) {
+                    try {
+                        size = LocalFile.size(activity, uriForHash);
+                        hash = autosubs.core.OpenSubtitlesHash.compute(LocalFile.reader(activity, uriForHash), size);
+                        Log.i(TAG, "Local file hash " + hash + " size " + size);
+                    } catch (Exception e) {
+                        Log.i(TAG, "No hash for local file: " + e);
+                    }
+                }
+                MediaId id = local ? null : MediaIdentifier.fromUrl(url, info);
                 if (id == null) id = MediaIdentifier.lookup(info);
                 Log.i(TAG, "Id: " + id);
                 final MediaId foundId = id;
@@ -480,7 +494,9 @@ public final class AutoSubs implements Player.Listener {
                 List<Future<List<SubtitleCandidate>>> futures = new ArrayList<>();
                 for (SubtitleSource s : sources) {
                     final MediaId fid = id;
-                    futures.add(executor.submit(() -> s.search(fid, null, -1, name, languages)));
+                    final String fhash = hash;
+                    final long fsize = size;
+                    futures.add(executor.submit(() -> s.search(fid, fhash, fsize, name, languages)));
                 }
                 List<SubtitleCandidate> found = new ArrayList<>();
                 Set<String> legacyIds = new HashSet<>();
@@ -594,6 +610,12 @@ public final class AutoSubs implements Player.Listener {
         pendingTrack = null;
         if (player == null) return;
 
+        if (auto && hasSideloadedSubtitle()) {
+            // A subtitle file next to the video (or passed by the calling app) wins over an online one
+            embeddedChosen = true;
+            Log.i(TAG, "Side-loaded subtitle present, online subtitle not used");
+            return;
+        }
         if (auto && prefs.preferEmbedded()) {
             Format embedded = selectedEmbeddedText();
             int rank = embedded == null ? -1 : languageRank(embedded.language);
@@ -650,6 +672,11 @@ public final class AutoSubs implements Player.Listener {
         main.removeCallbacks(syncCheck);
         stopTicking();
         clearCues();
+    }
+
+    private boolean hasSideloadedSubtitle() {
+        androidx.media3.common.MediaItem item = player == null ? null : player.getCurrentMediaItem();
+        return item != null && item.localConfiguration != null && !item.localConfiguration.subtitleConfigurations.isEmpty();
     }
 
     /** The embedded text track the player selected, if it isn't a forced-only track. */
@@ -784,11 +811,13 @@ public final class AutoSubs implements Player.Listener {
         if (mediaUri == null || fileName == null || !fileName.toLowerCase(Locale.ROOT).endsWith(".mkv")) return;
         final int gen = generation;
         final String url = mediaUri.toString();
+        final Uri uri = mediaUri;
         final String lang = prefs.language1();
         executor.execute(() -> {
             long t0 = SystemClock.elapsedRealtime();
             try {
-                List<MkvIndex.SubtitleTrackInfo> tracks = MkvIndex.read(url);
+                List<MkvIndex.SubtitleTrackInfo> tracks = LocalFile.isLocal(uri)
+                        ? MkvIndex.read(LocalFile.reader(activity, uri)) : MkvIndex.read(url);
                 MkvIndex.SubtitleTrackInfo best = null;
                 int bestScore = Integer.MIN_VALUE;
                 for (MkvIndex.SubtitleTrackInfo t : tracks) {
