@@ -1,17 +1,21 @@
 package com.brouken.player.subs;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.StateListDrawable;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.format.DateFormat;
 import android.text.style.AbsoluteSizeSpan;
 import android.text.style.ForegroundColorSpan;
-import android.text.style.StyleSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -25,35 +29,63 @@ import androidx.core.widget.ImageViewCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
 import androidx.media3.ui.DefaultTimeBar;
 import androidx.media3.ui.PlayerView;
+import androidx.preference.PreferenceManager;
 
 import com.brouken.player.R;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Modern look for Just Player's controls, applied on top of its own layout (so upstream layouts stay untouched):
- * buttons bottom left, time bottom right, soft gradients instead of black bars, a white "pill" on the focused
- * button (clear on TV), a title with video/audio info top left and the active subtitle language next to the
- * subtitle button.
+ * no big play button in the middle, all buttons in one row bottom left (play/pause first), times left and right
+ * of a thin time bar in an accent color, a rounded accent highlight on the focused button, soft gradients instead
+ * of black bars and a small title with video/audio info top left. Accent color and time format are settings.
  */
 public final class PlayerSkin {
 
+    static final String KEY_ENABLED = "skin_enabled";
+    static final String KEY_ACCENT = "skin_accent";
+    static final String KEY_TIME = "skin_time";
+    static final String DEFAULT_ACCENT = "#7B5CFA";
+    static final String TIME_TOTAL = "total";
+    static final String TIME_REMAINING = "remaining";
+    static final String TIME_END = "end";
+
     private final Activity activity;
     private final TextView titleView;
+    private final SharedPreferences prefs;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private int accent;
+    private boolean enabled;
     private TextView subtitleBadge;
+    private TextView timeLeft;
+    private TextView timeRight;
+    private DefaultTimeBar timeBar;
+    private Player player;
 
     private PlayerSkin(Activity activity, TextView titleView) {
         this.activity = activity;
         this.titleView = titleView;
+        this.prefs = PreferenceManager.getDefaultSharedPreferences(activity);
     }
 
     /** Call once, after PlayerActivity has built its controls. */
     public static PlayerSkin apply(Activity activity, PlayerView playerView, TextView titleView) {
         PlayerSkin skin = new PlayerSkin(activity, titleView);
+        skin.enabled = skin.prefs.getBoolean(KEY_ENABLED, true);
+        if (!skin.enabled) return skin;
+        try {
+            skin.accent = Color.parseColor(skin.prefs.getString(KEY_ACCENT, DEFAULT_ACCENT));
+        } catch (RuntimeException e) {
+            skin.accent = Color.parseColor(DEFAULT_ACCENT);
+        }
         try {
             skin.applyTo(playerView);
         } catch (RuntimeException e) {
@@ -67,9 +99,8 @@ public final class PlayerSkin {
         // Soft gradients: dark at the top (title) and bottom (controls), clear in the middle
         View background = playerView.findViewById(R.id.exo_controls_background);
         if (background != null) {
-            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{0xB0000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x8C000000, 0xF0000000});
-            background.setBackground(g);
+            background.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0xA0000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x8C000000, 0xF0000000}));
         }
         View bottomBar = playerView.findViewById(R.id.exo_bottom_bar);
         if (bottomBar != null) bottomBar.setBackground(new ColorDrawable(Color.TRANSPARENT));
@@ -78,19 +109,17 @@ public final class PlayerSkin {
             if (v != null) v.setBackground(new ColorDrawable(Color.TRANSPARENT));
         }
 
-        // Time to the right, buttons to the left
-        setGravity(playerView.findViewById(R.id.exo_time), Gravity.CENTER_VERTICAL | Gravity.END);
+        // Buttons bottom left; Media3's own (hidden) buttons come first in the row, so put ours in front
         setGravity(playerView.findViewById(R.id.exo_basic_controls), Gravity.CENTER_VERTICAL | Gravity.START);
         View scroll = playerView.findViewById(R.id.controls_scroll_view);
         setGravity(scroll, Gravity.BOTTOM | Gravity.START);
-        // Media3's own (hidden) buttons come first in the row and take up space: put ours in front
         if (scroll != null && scroll.getParent() instanceof ViewGroup) {
             ViewGroup row = (ViewGroup) scroll.getParent();
             row.removeView(scroll);
             row.addView(scroll, 0);
             row.setPadding(dp(16), row.getPaddingTop(), row.getPaddingRight(), row.getPaddingBottom());
-            // Just Player keeps 170sp free on the left for the time; the time is on the right now
-            scroll.setPaddingRelative(0, scroll.getPaddingTop(), dp(170), scroll.getPaddingBottom());
+            // Just Player keeps 170sp free on the left for the time, which now sits next to the time bar
+            scroll.setPaddingRelative(0, scroll.getPaddingTop(), dp(16), scroll.getPaddingBottom());
         }
         LinearLayout controls = playerView.findViewById(R.id.controls);
         if (controls != null) {
@@ -101,65 +130,171 @@ public final class PlayerSkin {
                 controls.removeViewAt(0);
                 controls.addView(open);
             }
+            movePlayPauseIntoRow(playerView, controls);
             for (int i = 0; i < controls.getChildCount(); i++) {
                 View child = controls.getChildAt(i);
-                if (child instanceof ImageButton) stylePill((ImageButton) child);
+                if (child instanceof ImageButton) styleButton((ImageButton) child);
             }
             addSubtitleBadge(controls, playerView.findViewById(R.id.exo_subtitle));
         }
-        View time = playerView.findViewById(R.id.exo_time);
-        if (time != null) time.setPadding(time.getPaddingLeft(), time.getPaddingTop(), dp(20), time.getPaddingBottom());
 
-        // Time bar: white played part, subtle rest
+        // Thin accent time bar with the times left and right of it
+        View exoTime = playerView.findViewById(R.id.exo_time);
+        if (exoTime != null) exoTime.setVisibility(View.GONE);
         View bar = playerView.findViewById(R.id.exo_progress);
         if (bar instanceof DefaultTimeBar) {
-            DefaultTimeBar t = (DefaultTimeBar) bar;
-            timeBar = t;
-            t.setPlayedColor(Color.WHITE);
-            t.setScrubberColor(Color.WHITE);
-            t.setUnplayedColor(0x33FFFFFF);
-            t.setBufferedColor(0x80FFFFFF);
+            timeBar = (DefaultTimeBar) bar;
+            timeBar.setPlayedColor(accent);
+            timeBar.setScrubberColor(accent);
+            timeBar.setUnplayedColor(0x40FFFFFF);
+            timeBar.setBufferedColor(0x66FFFFFF);
+            addTimeLabels(timeBar);
         }
 
-        // Title: no bar behind it, larger text with a second info line
+        // Title: no bar behind it, small, with a second info line
         if (titleView != null) {
             titleView.setBackground(new ColorDrawable(Color.TRANSPARENT));
             titleView.setMaxLines(2);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             titleView.setShadowLayer(dp(3), 0, dp(1), 0xAA000000);
-            titleView.setPadding(dp(28), dp(22), dp(28), dp(8));
+            titleView.setPadding(dp(28), dp(18), dp(28), dp(8));
         }
     }
 
-    private DefaultTimeBar timeBar;
-
-    /** Just Player sets the buffered color for every new video; tone it down so the played part stands out. */
-    public void onPlayerStarted() {
-        if (timeBar != null) timeBar.setBufferedColor(0x80FFFFFF);
+    /** The big play button in the middle becomes the first button of the bottom row (the loader stays centered). */
+    private void movePlayPauseIntoRow(PlayerView playerView, LinearLayout controls) {
+        View playPause = playerView.findViewById(R.id.exo_play_pause);
+        if (!(playPause instanceof ImageButton) || !(playPause.getParent() instanceof ViewGroup)) return;
+        View template = null;
+        for (int i = 0; i < controls.getChildCount(); i++) {
+            if (controls.getChildAt(i) instanceof ImageButton) {
+                template = controls.getChildAt(i);
+                break;
+            }
+        }
+        ((ViewGroup) playPause.getParent()).removeView(playPause);
+        LinearLayout.LayoutParams lp = template != null && template.getLayoutParams() != null
+                ? new LinearLayout.LayoutParams(template.getLayoutParams().width, template.getLayoutParams().height)
+                : new LinearLayout.LayoutParams(dp(48), dp(48));
+        ImageButton b = (ImageButton) playPause;
+        if (template != null) {
+            b.setPadding(template.getPaddingLeft(), template.getPaddingTop(), template.getPaddingRight(), template.getPaddingBottom());
+        }
+        b.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        controls.addView(b, 0, lp);
     }
 
-    /** White rounded "pill" behind the focused button, with a dark icon. */
-    private void stylePill(ImageButton b) {
+    /** Rounded accent highlight behind the focused button. */
+    private void styleButton(ImageButton b) {
+        int inset = dp(4);
         GradientDrawable focused = new GradientDrawable();
-        focused.setColor(Color.WHITE);
-        focused.setCornerRadius(dp(24));
+        focused.setColor(accent);
+        focused.setCornerRadius(dp(12));
         GradientDrawable pressed = new GradientDrawable();
-        pressed.setColor(0x66FFFFFF);
-        pressed.setCornerRadius(dp(24));
+        pressed.setColor((accent & 0x00FFFFFF) | 0x80000000);
+        pressed.setCornerRadius(dp(12));
         StateListDrawable bg = new StateListDrawable();
-        bg.addState(new int[]{android.R.attr.state_focused}, focused);
-        bg.addState(new int[]{android.R.attr.state_pressed}, pressed);
+        bg.addState(new int[]{android.R.attr.state_focused}, new InsetDrawable(focused, inset));
+        bg.addState(new int[]{android.R.attr.state_pressed}, new InsetDrawable(pressed, inset));
         bg.addState(new int[]{}, new ColorDrawable(Color.TRANSPARENT));
         b.setBackground(bg);
+        int iconOnAccent = isLight(accent) ? 0xFF111111 : Color.WHITE;
         ImageViewCompat.setImageTintList(b, new ColorStateList(
                 new int[][]{new int[]{android.R.attr.state_focused}, new int[]{}},
-                new int[]{0xFF111111, Color.WHITE}));
+                new int[]{iconOnAccent, Color.WHITE}));
         ViewGroup.LayoutParams lp = b.getLayoutParams();
         if (lp instanceof ViewGroup.MarginLayoutParams) {
-            ((ViewGroup.MarginLayoutParams) lp).setMargins(dp(3), 0, dp(3), 0);
+            ((ViewGroup.MarginLayoutParams) lp).setMargins(dp(2), 0, dp(2), 0);
             b.setLayoutParams(lp);
         }
     }
+
+    private void addTimeLabels(DefaultTimeBar bar) {
+        if (!(bar.getParent() instanceof FrameLayout) || !(bar.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout parent = (FrameLayout) bar.getParent();
+        FrameLayout.LayoutParams barLp = (FrameLayout.LayoutParams) bar.getLayoutParams();
+        int side = dp(104);
+        barLp.leftMargin = side;
+        barLp.rightMargin = side;
+        bar.setLayoutParams(barLp);
+        timeLeft = timeLabel(Gravity.END);
+        timeRight = timeLabel(Gravity.START);
+        int index = parent.indexOfChild(bar) + 1;
+        parent.addView(timeLeft, index, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.START));
+        parent.addView(timeRight, index + 1, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.END));
+    }
+
+    private TextView timeLabel(int textGravity) {
+        TextView t = new TextView(activity);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        t.setGravity(Gravity.BOTTOM | textGravity);
+        t.setPadding(dp(12), 0, dp(12), 0);
+        t.setFocusable(false);
+        t.setShadowLayer(dp(2), 0, dp(1), 0xAA000000);
+        return t;
+    }
+
+    private FrameLayout.LayoutParams timeLabelParams(FrameLayout.LayoutParams barLp, int width, int gravity) {
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, barLp.height, gravity);
+        lp.bottomMargin = barLp.bottomMargin - dp(3);
+        return lp;
+    }
+
+    // ---------------------------------------------------------------- player updates
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            updateTimes();
+            main.postDelayed(this, 500);
+        }
+    };
+
+    /** Called for every new player (Just Player sets the time bar colors again for each video). */
+    public void onPlayerStarted(Player player) {
+        this.player = player;
+        if (!enabled) return;
+        if (timeBar != null) timeBar.setBufferedColor(0x66FFFFFF);
+        main.removeCallbacks(tick);
+        if (timeLeft != null) main.post(tick);
+    }
+
+    public void onPlayerStopped() {
+        main.removeCallbacks(tick);
+        player = null;
+    }
+
+    private void updateTimes() {
+        if (player == null || timeLeft == null || !timeLeft.isShown()) return;
+        long pos = Math.max(0, player.getCurrentPosition());
+        long dur = player.getDuration();
+        boolean hours = dur != C.TIME_UNSET && dur >= 3600_000L;
+        timeLeft.setText(format(pos, hours));
+        if (dur == C.TIME_UNSET || dur <= 0) {
+            timeRight.setText("");
+            return;
+        }
+        String mode = prefs.getString(KEY_TIME, TIME_TOTAL);
+        if (TIME_REMAINING.equals(mode)) {
+            timeRight.setText("-" + format(Math.max(0, dur - pos), hours));
+        } else if (TIME_END.equals(mode)) {
+            float speed = player.getPlaybackParameters().speed;
+            long left = (long) ((dur - pos) / (speed > 0 ? speed : 1f));
+            String clock = DateFormat.getTimeFormat(activity).format(new Date(System.currentTimeMillis() + left));
+            timeRight.setText(activity.getString(R.string.skin_time_ends_at, clock));
+        } else {
+            timeRight.setText(format(dur, hours));
+        }
+    }
+
+    private static String format(long ms, boolean hours) {
+        long s = ms / 1000;
+        if (hours) return String.format(Locale.ROOT, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60);
+        return String.format(Locale.ROOT, "%02d:%02d", s / 60, s % 60);
+    }
+
+    // ---------------------------------------------------------------- subtitle badge and title
 
     /** Small label next to the subtitle button with the language of the online subtitle ("NL"). */
     private void addSubtitleBadge(LinearLayout controls, View subtitleButton) {
@@ -168,7 +303,7 @@ public final class PlayerSkin {
         if (index < 0) return;
         subtitleBadge = new TextView(activity);
         subtitleBadge.setTextColor(Color.WHITE);
-        subtitleBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        subtitleBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         subtitleBadge.setTypeface(Typeface.DEFAULT_BOLD);
         subtitleBadge.setFocusable(false);
         subtitleBadge.setVisibility(View.GONE);
@@ -186,22 +321,21 @@ public final class PlayerSkin {
         if (iso1 == null) {
             subtitleBadge.setVisibility(View.GONE);
         } else {
-            subtitleBadge.setText(iso1.toUpperCase(java.util.Locale.ROOT).replace("-", " "));
+            subtitleBadge.setText(iso1.toUpperCase(Locale.ROOT).replace("-", " "));
             subtitleBadge.setVisibility(View.VISIBLE);
         }
     }
 
     /** Title (e.g. "MobLand · S2 E1") and an info line from the selected tracks ("4K · HDR · Atmos"). */
     public void setTitle(String title, Tracks tracks) {
-        if (titleView == null || title == null) return;
+        if (!enabled || titleView == null || title == null) return;
         String info = info(tracks);
         SpannableStringBuilder sb = new SpannableStringBuilder(title);
-        sb.setSpan(new StyleSpan(Typeface.BOLD), 0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         if (!info.isEmpty()) {
             int start = sb.length();
             sb.append('\n').append(info);
-            sb.setSpan(new AbsoluteSizeSpan(15, true), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new ForegroundColorSpan(0xCCFFFFFF), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new AbsoluteSizeSpan(12, true), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new ForegroundColorSpan(0xB3FFFFFF), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         titleView.setText(sb);
     }
@@ -244,6 +378,13 @@ public final class PlayerSkin {
         return null;
     }
 
+    // ---------------------------------------------------------------- helpers
+
+    private static boolean isLight(int color) {
+        double l = 0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color);
+        return l > 186;
+    }
+
     private static void setGravity(View v, int gravity) {
         if (v == null) return;
         ViewGroup.LayoutParams lp = v.getLayoutParams();
@@ -253,8 +394,6 @@ public final class PlayerSkin {
         } else if (lp instanceof LinearLayout.LayoutParams) {
             ((LinearLayout.LayoutParams) lp).gravity = gravity;
             v.setLayoutParams(lp);
-        } else if (v instanceof LinearLayout) {
-            ((LinearLayout) v).setGravity(gravity);
         }
         if (v instanceof LinearLayout) ((LinearLayout) v).setGravity(gravity);
     }

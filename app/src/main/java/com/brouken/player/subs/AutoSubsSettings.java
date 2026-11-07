@@ -118,6 +118,8 @@ public final class AutoSubsSettings {
         });
         add(category, password);
 
+        addSkinSettings(screen, ctx);
+
         Preference system = new Preference(ctx);
         system.setTitle(R.string.autosubs_item_system);
         system.setSummary(R.string.autosubs_pref_system_summary);
@@ -129,6 +131,40 @@ public final class AutoSubsSettings {
             return true;
         });
         add(category, system);
+    }
+
+    /** Separate section for the look of the player controls (PlayerSkin). */
+    private static void addSkinSettings(PreferenceScreen screen, Context ctx) {
+        PreferenceCategory category = new PreferenceCategory(ctx);
+        category.setTitle(R.string.skin_category);
+        screen.addPreference(category);
+
+        SwitchPreferenceCompat enabled = new SwitchPreferenceCompat(ctx);
+        enabled.setKey(PlayerSkin.KEY_ENABLED);
+        enabled.setTitle(R.string.skin_enabled);
+        enabled.setSummary(R.string.skin_enabled_summary);
+        enabled.setDefaultValue(true);
+        add(category, enabled);
+
+        ListPreference accent = new ListPreference(ctx);
+        accent.setKey(PlayerSkin.KEY_ACCENT);
+        accent.setTitle(R.string.skin_accent);
+        accent.setDialogTitle(R.string.skin_accent);
+        accent.setEntries(ctx.getResources().getStringArray(R.array.skin_accent_names));
+        accent.setEntryValues(new String[]{"#7B5CFA", "#3D8BFF", "#1FB6C9", "#2ECC71", "#FFB020", "#FF7A3D", "#FF4D5E", "#FF4FA3", "#FFFFFF"});
+        accent.setDefaultValue(PlayerSkin.DEFAULT_ACCENT);
+        accent.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+        add(category, accent);
+
+        ListPreference time = new ListPreference(ctx);
+        time.setKey(PlayerSkin.KEY_TIME);
+        time.setTitle(R.string.skin_time);
+        time.setDialogTitle(R.string.skin_time);
+        time.setEntries(ctx.getResources().getStringArray(R.array.skin_time_names));
+        time.setEntryValues(new String[]{PlayerSkin.TIME_TOTAL, PlayerSkin.TIME_REMAINING, PlayerSkin.TIME_END});
+        time.setDefaultValue(PlayerSkin.TIME_TOTAL);
+        time.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+        add(category, time);
     }
 
     private static void add(PreferenceCategory category, Preference p) {

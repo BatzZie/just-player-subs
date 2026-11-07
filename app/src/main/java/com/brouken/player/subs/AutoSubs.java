@@ -191,7 +191,7 @@ public final class AutoSubs implements Player.Listener {
         this.playerView = playerView;
         attachedAt = SystemClock.elapsedRealtime();
         player.addListener(this);
-        if (skin != null) skin.onPlayerStarted();
+        if (skin != null) skin.onPlayerStarted(player);
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
@@ -217,6 +217,7 @@ public final class AutoSubs implements Player.Listener {
     }
 
     public void detach() {
+        if (skin != null) skin.onPlayerStopped();
         rememberPosition();
         exitTimingMode();
         stopTicking();

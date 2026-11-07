@@ -42,4 +42,17 @@
     <string name="autosubs_pref_os_username_summary">Optioneel: verhoogt het aantal downloads per dag</string>
     <string name="autosubs_pref_os_password">OpenSubtitles.com wachtwoord</string>
     <string name="autosubs_pref_system_summary">Tekstgrootte, kleur en achtergrond van ondertitels</string>
+    <string name="skin_category">Weergave speler</string>
+    <string name="skin_enabled">Moderne knoppen</string>
+    <string name="skin_enabled_summary">Knoppen linksonder, accentkleur, tijden naast de tijdbalk. Geldt vanaf de volgende video.</string>
+    <string name="skin_accent">Accentkleur</string>
+    <string name="skin_time">Tijd rechts</string>
+    <string name="skin_time_ends_at">klaar om %s</string>
+    <string-array name="skin_accent_names">
+        <item>Paars</item><item>Blauw</item><item>Turquoise</item><item>Groen</item><item>Geel</item>
+        <item>Oranje</item><item>Rood</item><item>Roze</item><item>Wit</item>
+    </string-array>
+    <string-array name="skin_time_names">
+        <item>Totale duur</item><item>Resterende tijd</item><item>Eindtijd (klok)</item>
+    </string-array>
 </resources>

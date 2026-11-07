@@ -42,4 +42,17 @@
     <string name="autosubs_pref_os_username_summary">Optional: raises the daily download limit</string>
     <string name="autosubs_pref_os_password">OpenSubtitles.com password</string>
     <string name="autosubs_pref_system_summary">Text size, colour and background of subtitles</string>
+    <string name="skin_category">Player look</string>
+    <string name="skin_enabled">Modern controls</string>
+    <string name="skin_enabled_summary">Buttons bottom left, accent color, times next to the time bar. Applies when a video starts.</string>
+    <string name="skin_accent">Accent color</string>
+    <string name="skin_time">Time on the right</string>
+    <string name="skin_time_ends_at">ends %s</string>
+    <string-array name="skin_accent_names">
+        <item>Purple</item><item>Blue</item><item>Teal</item><item>Green</item><item>Yellow</item>
+        <item>Orange</item><item>Red</item><item>Pink</item><item>White</item>
+    </string-array>
+    <string-array name="skin_time_names">
+        <item>Total duration</item><item>Remaining time</item><item>End time (clock)</item>
+    </string-array>
 </resources>
