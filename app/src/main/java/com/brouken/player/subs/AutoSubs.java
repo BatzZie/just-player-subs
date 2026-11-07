@@ -144,6 +144,9 @@ public final class AutoSubs implements Player.Listener {
     // Sync reference from the MKV index (null = not available yet)
     private boolean indexRequested;
     private List<Long> indexRefs;
+    /** The active subtitle was picked automatically (not by the user), so a better fitting one may replace it. */
+    private boolean activeAuto;
+    private boolean bestFitChecked;
 
     private long attachedAt;
 
@@ -240,6 +243,8 @@ public final class AutoSubs implements Player.Listener {
         syncProvisional = false;
         indexRequested = false;
         indexRefs = null;
+        activeAuto = false;
+        bestFitChecked = false;
         lastPositionMs = -1;
         lastDurationMs = -1;
     }
@@ -500,6 +505,7 @@ public final class AutoSubs implements Player.Listener {
         boolean switching = active != null && active != c;
         active = c;
         activeTrack = track;
+        activeAuto = auto;
         embeddedChosen = false;
         userOff = false;
         long duration = player.getDuration();
@@ -696,28 +702,102 @@ public final class AutoSubs implements Player.Listener {
         });
     }
 
+    /** Minimum gain in fit before an automatically picked subtitle is replaced by a better fitting one. */
+    private static final double BETTER_FIT = 0.08;
+
+    /**
+     * Aligns the active subtitle to the MKV index. When the subtitle was picked automatically, also compares the
+     * best few candidates in the same language and switches to one that fits the video clearly better.
+     */
     private void syncFromIndex(boolean manual) {
-        if (activeTrack == null || indexRefs == null) return;
+        if (activeTrack == null || indexRefs == null || player == null) return;
         final int gen = generation;
-        final SubtitleTrack track = activeTrack;
-        final double s = scale;
+        final SubtitleCandidate current = active;
+        final SubtitleTrack currentTrack = activeTrack;
+        final double currentScale = scale;
         final List<Long> refs = indexRefs;
+        final float videoFps = videoFrameRate();
+        final long duration = player.getDuration() == C.TIME_UNSET ? -1 : player.getDuration();
         if (!syncWanted) {
             syncWanted = true;
             syncStartedAt = SystemClock.elapsedRealtime();
         }
         syncManual = manual;
+
+        final List<SubtitleCandidate> alternatives = new ArrayList<>();
+        alternatives.add(current);
+        if (!manual && activeAuto && !bestFitChecked) {
+            for (SubtitleCandidate c : ranked) {
+                if (alternatives.size() >= 3) break;
+                if (c != current && c.langRank == current.langRank) alternatives.add(c);
+            }
+        }
+        bestFitChecked = true;
+        final Map<String, SubtitleTrack> known = new HashMap<>(trackCache);
+        known.put(current.id, currentTrack);
+
         executor.execute(() -> {
             long t0 = SystemClock.elapsedRealtime();
-            AutoSync.Result r = AutoSync.estimateAll(refs, track.startTimesMs(), s);
-            Log.i(TAG, "Index sync: " + (r == null ? "no clear match" : r.offsetMs + " ms") + " in "
-                    + (SystemClock.elapsedRealtime() - t0) + " ms");
+            Map<String, SubtitleTrack> tracks = new HashMap<>();
+            Map<String, Double> scales = new HashMap<>();
+            Map<String, AutoSync.Result> results = new HashMap<>();
+            for (SubtitleCandidate c : alternatives) {
+                SubtitleTrack t = known.get(c.id);
+                if (t == null) {
+                    try {
+                        t = SubtitleTrack.parse(c.source.download(c));
+                    } catch (Exception e) {
+                        Log.i(TAG, "Fit check: download failed for " + c.id + ": " + e);
+                        continue;
+                    }
+                }
+                if (t.size() == 0) continue;
+                double sc = c == current ? currentScale
+                        : t.detectScale(c.fpsMilli > 0 ? c.fpsMilli / 1000.0 : -1, videoFps, duration);
+                AutoSync.Result r = AutoSync.estimateAll(refs, t.startTimesMs(), sc);
+                Log.i(TAG, "Fit " + String.format(Locale.ROOT, "%.2f", r == null ? 0.0 : r.fit()) + " offset "
+                        + (r == null ? "-" : r.offsetMs + " ms") + ": " + c);
+                tracks.put(c.id, t);
+                scales.put(c.id, sc);
+                if (r != null) results.put(c.id, r);
+            }
+            SubtitleCandidate best = null;
+            for (SubtitleCandidate c : alternatives) {
+                AutoSync.Result r = results.get(c.id);
+                if (r != null && (best == null || r.fit() > results.get(best.id).fit())) best = c;
+            }
+            final SubtitleCandidate chosen = best;
+            Log.i(TAG, "Index sync of " + alternatives.size() + " subtitle(s) took " + (SystemClock.elapsedRealtime() - t0) + " ms");
             post(gen, () -> {
-                if (activeTrack != track) return;
-                if (r != null) finishSync(r.offsetMs);
-                else if (manual) startSync(true); // fall back to watching along
+                if (activeTrack != currentTrack) return;
+                for (Map.Entry<String, SubtitleTrack> e : tracks.entrySet()) trackCache.put(e.getKey(), e.getValue());
+                AutoSync.Result cur = results.get(current.id);
+                double curFit = cur == null ? 0 : cur.fit();
+                if (chosen != null && chosen != current && results.get(chosen.id).fit() >= curFit + BETTER_FIT) {
+                    switchTo(chosen, tracks.get(chosen.id), scales.get(chosen.id), results.get(chosen.id).offsetMs);
+                } else if (cur != null) {
+                    finishSync(cur.offsetMs);
+                } else if (manual) {
+                    startSync(true); // fall back to watching along
+                }
             });
         });
+    }
+
+    /** Replaces the automatically picked subtitle by one that fits the video better, already in sync. */
+    private void switchTo(SubtitleCandidate c, SubtitleTrack track, double newScale, long offset) {
+        Log.i(TAG, "Better fitting subtitle: " + c + " (was " + active + "), offset " + offset + " ms");
+        syncWanted = false;
+        main.removeCallbacks(syncCheck);
+        active = c;
+        activeTrack = track;
+        activeAuto = true;
+        scale = newScale;
+        offsetMs = offset;
+        prefs.setOffset(fileKey, offsetMs, false);
+        sync.resetAgreement();
+        render(true);
+        toast(activity.getString(R.string.autosubs_loaded, c.label()));
     }
 
     // ---------------------------------------------------------------- Player.Listener

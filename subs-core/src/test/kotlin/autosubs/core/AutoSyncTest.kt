@@ -108,3 +108,18 @@ class AutoSyncTest {
         assertTrue(Math.abs(r.offsetMs + 1900) <= 200, "estimated ${r.offsetMs}")
     }
 }
+
+class PickBestTest {
+    @Test fun choosesTheSubtitleThatFitsBest() {
+        val r = Random(5)
+        var t = 30_000L
+        val reference = LongArray(900) { t += 900 + r.nextLong(6000); t }
+        // good: same lines, small noise, other offset; poor: a different cut with only every third line in sync
+        val good = reference.map { it + 1200 + r.nextLong(-150, 150) }.toLongArray()
+        val poor = reference.mapIndexed { i, v -> if (i % 3 == 0) v + 1200 else v + 1200 + 2000 + r.nextLong(3000) }.toLongArray()
+        val result = AutoSync.pickBest(reference.toList(), mapOf("poor" to poor, "good" to good), 1.0)
+        kotlin.test.assertEquals("good", result?.first)
+        assertTrue(Math.abs(result!!.second.offsetMs + 1200) < 100, "offset ${result.second.offsetMs}")
+        assertTrue(result.second.fit() > 0.9)
+    }
+}

@@ -13,7 +13,14 @@ class AutoSync {
 
     enum class Level { PROVISIONAL, FINAL }
 
-    class Result(@JvmField val offsetMs: Long, @JvmField val level: Level)
+    /**
+     * @param matched    reference lines that have a line of the subtitle within 0.35 s at this offset
+     * @param references number of reference lines
+     */
+    class Result(@JvmField val offsetMs: Long, @JvmField val level: Level, @JvmField val matched: Int, @JvmField val references: Int) {
+        /** How well the subtitle fits the video (0..1), comparable between subtitles for the same reference. */
+        fun fit(): Double = if (references == 0) 0.0 else matched.toDouble() / references
+    }
 
     private val refStarts = ArrayList<Long>()
     private var lastEmpty = true
@@ -96,7 +103,7 @@ class AutoSync {
         }
         if (diffs.isEmpty()) return null
         diffs.sort()
-        return Result(Math.round(diffs[diffs.size / 2]), level)
+        return Result(Math.round(diffs[diffs.size / 2]), level, matched, n)
     }
 
     companion object {
@@ -116,6 +123,21 @@ class AutoSync {
             }
             val r = s.estimate(subStartsMs, scale)
             return if (r != null && r.level == Level.FINAL) r else null
+        }
+
+        /**
+         * Picks the subtitle that fits a complete reference best. Each entry: candidate id to its start times.
+         * @return id and result of the best fitting subtitle, or null if none gives a clear match
+         */
+        @JvmStatic
+        fun pickBest(refStartsMs: List<Long>, subtitles: Map<String, LongArray>, scale: Double): Pair<String, Result>? {
+            var best: Pair<String, Result>? = null
+            for ((id, starts) in subtitles) {
+                val r = estimateAll(refStartsMs, starts, scale) ?: continue
+                CoreLog.i("Fit $id: ${"%.2f".format(r.fit())} offset ${r.offsetMs} ms")
+                if (best == null || r.fit() > best.second.fit()) best = id to r
+            }
+            return best
         }
 
         private fun lowerBound(a: DoubleArray, v: Double): Int {
