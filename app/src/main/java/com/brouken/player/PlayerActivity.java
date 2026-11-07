@@ -1232,7 +1232,7 @@ public class PlayerActivity extends Activity {
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(com.brouken.player.subs.Net.dataSourceFactory(this), extractorsFactory));
 
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
