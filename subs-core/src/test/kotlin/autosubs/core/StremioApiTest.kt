@@ -48,3 +48,13 @@ class StremioApiTest {
         assertEquals(1, state(item).long("timesWatched", -1))
     }
 }
+
+class StremioFinishedRepeatTest {
+    @Test fun repeatedFinishedWriteDoesNotCountTwice() {
+        val now = "2026-11-07T15:00:00.000Z"
+        val first = StremioApi.withProgress(null, "tt1", "movie", "tt1", "X", null, 5_000_000, 5_100_000, 100_000, true, now, true)
+        val again = StremioApi.withProgress(first, "tt1", "movie", "tt1", "X", null, 5_000_000, 5_100_000, 0, true, now, false)
+        assertEquals(1, again["state"].obj()!!.long("timesWatched", -1))
+        assertEquals(0, again["state"].obj()!!.long("timeOffset", -1))
+    }
+}

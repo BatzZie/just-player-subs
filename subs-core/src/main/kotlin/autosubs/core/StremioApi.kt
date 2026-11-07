@@ -58,11 +58,13 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
      * @return true if the item was new in the library
      */
     @Throws(IOException::class)
-    fun reportProgress(authKey: String, id: MediaId, positionMs: Long, durationMs: Long, watchedMs: Long, finished: Boolean): Boolean {
+    @JvmOverloads
+    fun reportProgress(authKey: String, id: MediaId, positionMs: Long, durationMs: Long, watchedMs: Long, finished: Boolean,
+                       countWatch: Boolean = true): Boolean {
         val existing = getLibraryItem(authKey, id.imdbId)
         val meta = fullMeta(id.type(), id.imdbId)
         var item = withProgress(existing, id.imdbId, id.type(), id.videoId(), meta?.name, meta?.poster,
-            positionMs, durationMs, watchedMs, finished, now())
+            positionMs, durationMs, watchedMs, finished, now(), countWatch)
         // Stremio marks an episode as watched when it hands it to an external player: undo that for this video
         // (or mark it when it was watched to the end)
         val state = item["state"].obj() ?: JsonObject(emptyMap())
@@ -73,8 +75,9 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
             field.set(id.videoId(), finished)
             CoreLog.i("Stremio watched ${id.videoId()}: $before -> $finished (${ids.size} videos)")
             JsonObject(state + ("watched" to JsonPrimitive(field.toString())))
-        } else if (!id.isSeries() && !finished) {
-            JsonObject(state + ("flaggedWatched" to JsonPrimitive(0)))
+        } else if (!id.isSeries()) {
+            // Movies: watched to the end -> marked watched; stopped earlier -> not
+            JsonObject(state + ("flaggedWatched" to JsonPrimitive(if (finished) 1 else 0)))
         } else state
         item = JsonObject(item + ("state" to newState))
         putLibraryItem(authKey, item)
@@ -127,6 +130,7 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         fun withProgress(
             existing: JsonObject?, id: String, type: String, videoId: String, name: String?, poster: String?,
             positionMs: Long, durationMs: Long, watchedMs: Long, finished: Boolean, now: String,
+            countWatch: Boolean = true,
         ): JsonObject {
             val oldState = existing?.get("state").obj() ?: JsonObject(emptyMap())
             val sameVideo = oldState.str("video_id") == videoId
@@ -138,7 +142,7 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
                 put("duration", durationMs)
                 put("timeWatched", (if (sameVideo) oldState.long("timeWatched", 0) else 0) + watchedMs)
                 put("overallTimeWatched", oldState.long("overallTimeWatched", 0) + watchedMs)
-                put("timesWatched", oldState.long("timesWatched", 0) + if (finished) 1 else 0)
+                put("timesWatched", oldState.long("timesWatched", 0) + if (finished && countWatch) 1 else 0)
                 if (!oldState.has("flaggedWatched")) put("flaggedWatched", 0)
                 if (!oldState.has("noNotif")) put("noNotif", false)
                 if (!oldState.has("watched")) put("watched", JsonNull)

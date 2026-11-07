@@ -374,9 +374,10 @@ public final class AutoSubs implements Player.Listener {
         final long token = stremioSyncToken.incrementAndGet();
         Thread t = new Thread(() -> {
             autosubs.core.StremioApi api = new autosubs.core.StremioApi();
-            // A finished video is written once (repeating would count it as watched again)
+            // Also a finished video is checked again: Stremio writes back its old copy when it comes to the front.
+            // Only the first write counts it as watched once more.
             long started = System.currentTimeMillis();
-            for (long at : done ? new long[]{0} : new long[]{0, 10_000, 30_000, 60_000, 120_000}) {
+            for (long at : new long[]{0, 10_000, 30_000, 60_000, 120_000}) {
                 try {
                     long wait = started + at - System.currentTimeMillis();
                     if (wait > 0) Thread.sleep(wait);
@@ -385,7 +386,7 @@ public final class AutoSubs implements Player.Listener {
                         return;
                     }
                     if (at > 0) Log.i(TAG, "Stremio state after " + (at / 1000) + "s: " + api.describe(authKey, id));
-                    boolean isNew = api.reportProgress(authKey, id, pos, dur, at == 0 ? watched : 0, done);
+                    boolean isNew = api.reportProgress(authKey, id, pos, dur, at == 0 ? watched : 0, done, at == 0);
                     Log.i(TAG, "Stremio progress written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
                             + "s" + (done ? " (finished)" : "") + (isNew ? " (new item)" : ""));
                 } catch (InterruptedException e) {
