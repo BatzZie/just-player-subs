@@ -351,6 +351,9 @@ public final class AutoSubs implements Player.Listener {
         }
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
+        // Stremio is leading: stopping in the last 10% counts as finished, like with Stremio's own player
+        // (CREDITS_THRESHOLD_COEF 0.9); Stremio then decides about the watched mark and the next episode.
+        if (!finished && lastDurationMs > 0 && lastPositionMs >= lastDurationMs * FINISHED) finished = true;
         if (finished && prefs.stremioAuthKeyForSync() != null) {
             // Watched to the end: Stremio handles a completion result correctly (marks it watched and starts the
             // next episode). Don't write the account ourselves, that could undo Stremio's move to the next episode.
@@ -371,7 +374,7 @@ public final class AutoSubs implements Player.Listener {
             intent.removeExtra("extra_duration");
             intent.removeExtra("extra_position");
             if (mediaId != null && lastPositionMs >= 0 && lastDurationMs > 0) {
-                prefs.setResume(mediaId.videoId(), lastPositionMs, finished || lastPositionMs >= lastDurationMs * 0.95);
+                prefs.setResume(mediaId.videoId(), lastPositionMs, finished || lastPositionMs >= lastDurationMs * FINISHED);
             }
             Log.i(TAG, "Result for the caller: MX format without duration, position=" + intent.getIntExtra("position", -1)
                     + " end_by=" + intent.getStringExtra("end_by"));
@@ -397,6 +400,9 @@ public final class AutoSubs implements Player.Listener {
      */
     private static final boolean STREMIO_RESULT_WITHOUT_DURATION = false;
 
+    /** Share of the duration from which a video counts as finished: Stremio's own credits threshold. */
+    private static final double FINISHED = 0.9;
+
     /** Each stop (and each new start) gets a new token; older background writes stop when they see a newer one. */
     private static final java.util.concurrent.atomic.AtomicLong stremioSyncToken = new java.util.concurrent.atomic.AtomicLong();
 
@@ -405,9 +411,9 @@ public final class AutoSubs implements Player.Listener {
         final MediaId id = mediaId;
         final long pos = lastPositionMs;
         final long dur = lastDurationMs;
-        if (id != null && pos >= 0 && dur > 0) prefs.setResume(id.videoId(), pos, finished || pos >= dur * 0.95);
+        if (id != null && pos >= 0 && dur > 0) prefs.setResume(id.videoId(), pos, finished || pos >= dur * FINISHED);
         if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
-        final boolean done = finished || pos >= dur * 0.95;
+        final boolean done = finished || pos >= dur * FINISHED;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
         final long token = stremioSyncToken.incrementAndGet();
         Thread t = new Thread(() -> {
