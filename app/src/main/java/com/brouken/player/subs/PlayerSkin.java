@@ -421,6 +421,16 @@ public final class PlayerSkin {
         int index = parent.indexOfChild(bar) + 1;
         parent.addView(timeLeft, index, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.START));
         parent.addView(timeRight, index + 1, timeLabelParams(barLp, side, Gravity.BOTTOM | Gravity.END));
+        // Media3 slides and fades the time bar when the controls hide: let the times follow it every frame
+        parent.getViewTreeObserver().addOnPreDrawListener(() -> {
+            for (TextView t : new TextView[]{timeLeft, timeRight}) {
+                if (t.getTranslationY() != bar.getTranslationY()) t.setTranslationY(bar.getTranslationY());
+                if (t.getAlpha() != bar.getAlpha()) t.setAlpha(bar.getAlpha());
+                int vis = bar.getVisibility();
+                if (t.getVisibility() != vis) t.setVisibility(vis);
+            }
+            return true;
+        });
     }
 
     /** Keep the time labels at the same height as the time bar (its bottom margin changes with the insets). */
