@@ -61,8 +61,16 @@ public final class LaunchTransition implements Player.Listener {
 
     @Override
     public void onRenderedFirstFrame() {
-        setSpinnerHidden(false);
         reveal("first frame");
+    }
+
+    /**
+     * The first frame comes a moment before READY, and Just Player hides its spinner only at READY: allow the
+     * spinner again only then (its own listener runs first), otherwise it flashes over the first frame.
+     */
+    @Override
+    public void onPlaybackStateChanged(int state) {
+        if (state == Player.STATE_READY || state == Player.STATE_ENDED) setSpinnerHidden(false);
     }
 
     /** For a seamless start: no loading spinner on black between the loading screen and the first frame. */
@@ -102,7 +110,8 @@ public final class LaunchTransition implements Player.Listener {
 
     /** Also used when the player has nothing to show (e.g. no media). */
     void reveal(String why) {
-        if (!"Dolby Vision".equals(why) && !"HDR".equals(why)) setSpinnerHidden(false);
+        // Errors and the timeout should show the spinner/error right away
+        if ("error".equals(why) || "timeout".equals(why) || "player released".equals(why)) setSpinnerHidden(false);
         if (!waiting) return;
         waiting = false;
         main.removeCallbacksAndMessages(null);
