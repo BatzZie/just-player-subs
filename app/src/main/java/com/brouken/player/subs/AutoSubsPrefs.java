@@ -25,6 +25,9 @@ final class AutoSubsPrefs {
     static final String KEY_OS_USERNAME = "autosubs_os_username";
     static final String KEY_OS_PASSWORD = "autosubs_os_password";
     static final String CHOICE_OFF = "off";
+    static final String KEY_STREMIO_SYNC = "stremio_sync";
+    static final String KEY_STREMIO_AUTH = "stremio_auth_key";
+    static final String KEY_STREMIO_EMAIL = "stremio_email";
 
     private final SharedPreferences settings;
     private final SharedPreferences files;
@@ -66,6 +69,22 @@ final class AutoSubsPrefs {
         String l2 = language2();
         if (!l2.isEmpty() && !Languages.matches(l2, language1())) list.add(l2);
         return list;
+    }
+
+    /** Login key for the Stremio account, or null when not logged in or sync is off. */
+    String stremioAuthKeyForSync() {
+        if (!settings.getBoolean(KEY_STREMIO_SYNC, true)) return null;
+        String k = settings.getString(KEY_STREMIO_AUTH, "");
+        return k.isEmpty() ? null : k;
+    }
+
+    String stremioEmail() {
+        return settings.getString(KEY_STREMIO_EMAIL, "");
+    }
+
+    void setStremioLogin(String authKey, String email) {
+        if (authKey == null) settings.edit().remove(KEY_STREMIO_AUTH).remove(KEY_STREMIO_EMAIL).apply();
+        else settings.edit().putString(KEY_STREMIO_AUTH, authKey).putString(KEY_STREMIO_EMAIL, email).apply();
     }
 
     String openSubtitlesApiKey() {

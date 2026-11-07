@@ -261,6 +261,8 @@ public final class AutoSubs implements Player.Listener {
         bestFitChecked = false;
         lastPositionMs = -1;
         lastDurationMs = -1;
+        startPositionMs = -1;
+        mediaId = null;
     }
 
     /** Ask the player for an embedded text track up front (preferred languages, then English as sync reference). */
@@ -309,9 +311,12 @@ public final class AutoSubs implements Player.Listener {
 
     private long lastPositionMs = -1;
     private long lastDurationMs = -1;
+    private long startPositionMs = -1;
+    private MediaId mediaId;
 
     private void rememberPosition() {
         if (player == null || mediaUri == null) return;
+        if (startPositionMs < 0 && player.getPlaybackState() == Player.STATE_READY) startPositionMs = player.getCurrentPosition();
         long d = player.getDuration();
         if (d != C.TIME_UNSET && d > 0) lastDurationMs = d;
         if (player.isCurrentMediaItemSeekable()) lastPositionMs = player.getCurrentPosition();
@@ -332,6 +337,39 @@ public final class AutoSubs implements Player.Listener {
         if (intent.hasExtra("duration")) intent.putExtra("extra_duration", (long) intent.getIntExtra("duration", 0));
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
+        reportToStremio(finished);
+    }
+
+    /**
+     * Writes the watch progress to the user's Stremio library (optional, needs a login in the settings). Stremio
+     * ignores the result of external players it doesn't know and can overwrite the library when it comes back to
+     * the front, so the write is repeated a few times.
+     */
+    private void reportToStremio(boolean finished) {
+        final String authKey = prefs.stremioAuthKeyForSync();
+        final MediaId id = mediaId;
+        final long pos = lastPositionMs;
+        final long dur = lastDurationMs;
+        if (authKey == null || id == null || dur <= 0 || pos < 0) return;
+        final boolean done = finished || pos >= dur * 0.95;
+        final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
+        Thread t = new Thread(() -> {
+            autosubs.core.StremioApi api = new autosubs.core.StremioApi();
+            // A finished video is written once (repeating would count it as watched again)
+            for (long delay : done ? new long[]{0} : new long[]{0, 10_000, 30_000}) {
+                try {
+                    if (delay > 0) Thread.sleep(delay);
+                    boolean isNew = api.reportProgress(authKey, id, pos, dur, delay == 0 ? watched : 0, done);
+                    Log.i(TAG, "Stremio progress written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
+                            + "s" + (done ? " (finished)" : "") + (isNew ? " (new item)" : ""));
+                } catch (InterruptedException e) {
+                    return;
+                } catch (Exception e) {
+                    Log.w(TAG, "Stremio progress failed: " + e.getMessage());
+                }
+            }
+        }, "StremioSync");
+        t.start();
     }
 
     // ---------------------------------------------------------------- search
@@ -378,6 +416,8 @@ public final class AutoSubs implements Player.Listener {
                 MediaId id = MediaIdentifier.fromUrl(url, info);
                 if (id == null) id = MediaIdentifier.lookup(info);
                 Log.i(TAG, "Id: " + id);
+                final MediaId foundId = id;
+                post(gen, () -> mediaId = foundId);
                 if (id == null) {
                     post(gen, () -> onSearchDone(Collections.emptyList()));
                     return;
@@ -822,6 +862,7 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onPlaybackStateChanged(int state) {
         Log.i(TAG, "Player state " + state + " " + sinceAttach());
+        if (state == Player.STATE_READY && startPositionMs < 0 && player != null) startPositionMs = player.getCurrentPosition();
         if (state == Player.STATE_READY && !indexRequested && owning) fetchIndex();
         if (state == Player.STATE_READY && pending != null) {
             activate(pending, pendingTrack, pendingAuto);

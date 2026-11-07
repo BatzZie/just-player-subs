@@ -118,6 +118,7 @@ public final class AutoSubsSettings {
         });
         add(category, password);
 
+        addStremioSettings(fragment, screen, ctx);
         addSkinSettings(screen, ctx);
 
         Preference system = new Preference(ctx);
@@ -131,6 +132,92 @@ public final class AutoSubsSettings {
             return true;
         });
         add(category, system);
+    }
+
+    /** Stremio account: writes watch progress to the library (Stremio ignores results from unknown players). */
+    private static void addStremioSettings(PreferenceFragmentCompat fragment, PreferenceScreen screen, Context ctx) {
+        PreferenceCategory category = new PreferenceCategory(ctx);
+        category.setTitle(R.string.stremio_category);
+        screen.addPreference(category);
+        AutoSubsPrefs prefs = new AutoSubsPrefs(ctx);
+
+        Preference account = new Preference(ctx);
+        account.setTitle(R.string.stremio_account);
+        Runnable updateSummary = () -> {
+            String email = prefs.stremioEmail();
+            account.setSummary(email.isEmpty() ? ctx.getString(R.string.stremio_account_summary)
+                    : ctx.getString(R.string.stremio_logged_in, email));
+        };
+        updateSummary.run();
+        account.setOnPreferenceClickListener(p -> {
+            if (!prefs.stremioEmail().isEmpty()) {
+                new androidx.appcompat.app.AlertDialog.Builder(fragment.requireActivity())
+                        .setTitle(R.string.stremio_account)
+                        .setMessage(ctx.getString(R.string.stremio_logged_in, prefs.stremioEmail()))
+                        .setPositiveButton(R.string.stremio_logout, (d, w) -> {
+                            prefs.setStremioLogin(null, null);
+                            updateSummary.run();
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            } else {
+                showStremioLogin(fragment, prefs, updateSummary);
+            }
+            return true;
+        });
+        add(category, account);
+
+        SwitchPreferenceCompat sync = new SwitchPreferenceCompat(ctx);
+        sync.setKey(AutoSubsPrefs.KEY_STREMIO_SYNC);
+        sync.setTitle(R.string.stremio_sync);
+        sync.setSummary(R.string.stremio_sync_summary);
+        sync.setDefaultValue(true);
+        add(category, sync);
+    }
+
+    private static void showStremioLogin(PreferenceFragmentCompat fragment, AutoSubsPrefs prefs, Runnable done) {
+        android.app.Activity activity = fragment.requireActivity();
+        int pad = Math.round(20 * activity.getResources().getDisplayMetrics().density);
+        android.widget.LinearLayout form = new android.widget.LinearLayout(activity);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        form.setPadding(pad, pad / 2, pad, 0);
+        android.widget.EditText email = new android.widget.EditText(activity);
+        email.setHint(R.string.stremio_email);
+        email.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        email.setSingleLine(true);
+        android.widget.EditText password = new android.widget.EditText(activity);
+        password.setHint(R.string.stremio_password);
+        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setSingleLine(true);
+        form.addView(email);
+        form.addView(password);
+        new androidx.appcompat.app.AlertDialog.Builder(activity)
+                .setTitle(R.string.stremio_account)
+                .setMessage(R.string.stremio_login_message)
+                .setView(form)
+                .setPositiveButton(R.string.stremio_login, (d, w) -> {
+                    String e = email.getText().toString().trim();
+                    String pw = password.getText().toString();
+                    new Thread(() -> {
+                        String error = null;
+                        try {
+                            autosubs.core.StremioApi.Login login = new autosubs.core.StremioApi().login(e, pw);
+                            prefs.setStremioLogin(login.authKey, login.email);
+                        } catch (Exception ex) {
+                            error = ex.getMessage();
+                        }
+                        final String err = error;
+                        activity.runOnUiThread(() -> {
+                            done.run();
+                            android.widget.Toast.makeText(activity, err == null
+                                    ? activity.getString(R.string.stremio_logged_in, prefs.stremioEmail())
+                                    : activity.getString(R.string.stremio_login_failed, err),
+                                    android.widget.Toast.LENGTH_LONG).show();
+                        });
+                    }, "StremioLogin").start();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /** Separate section for the look of the player controls (PlayerSkin). */

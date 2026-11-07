@@ -55,4 +55,16 @@
     <string-array name="skin_time_names">
         <item>Totale duur</item><item>Resterende tijd</item><item>Eindtijd (klok)</item>
     </string-array>
+    <string name="stremio_category">Stremio</string>
+    <string name="stremio_account">Stremio-account</string>
+    <string name="stremio_account_summary">Log in om je kijkvoortgang naar Stremio te sturen (Verder kijken)</string>
+    <string name="stremio_logged_in">Ingelogd als %s</string>
+    <string name="stremio_logout">Uitloggen</string>
+    <string name="stremio_login">Inloggen</string>
+    <string name="stremio_email">E-mailadres</string>
+    <string name="stremio_password">Wachtwoord</string>
+    <string name="stremio_login_message">Op dit apparaat wordt alleen een login-sleutel bewaard, niet je wachtwoord.</string>
+    <string name="stremio_login_failed">Inloggen mislukt: %s</string>
+    <string name="stremio_sync">Kijkvoortgang naar Stremio sturen</string>
+    <string name="stremio_sync_summary">Bij stoppen wordt de positie in je Stremio-bibliotheek opgeslagen</string>
 </resources>

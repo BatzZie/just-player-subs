@@ -55,4 +55,16 @@
     <string-array name="skin_time_names">
         <item>Total duration</item><item>Remaining time</item><item>End time (clock)</item>
     </string-array>
+    <string name="stremio_category">Stremio</string>
+    <string name="stremio_account">Stremio account</string>
+    <string name="stremio_account_summary">Log in to send your watch progress to Stremio (Continue watching)</string>
+    <string name="stremio_logged_in">Logged in as %s</string>
+    <string name="stremio_logout">Log out</string>
+    <string name="stremio_login">Log in</string>
+    <string name="stremio_email">E-mail</string>
+    <string name="stremio_password">Password</string>
+    <string name="stremio_login_message">Only a login key is stored on this device, not your password.</string>
+    <string name="stremio_login_failed">Login failed: %s</string>
+    <string name="stremio_sync">Send watch progress to Stremio</string>
+    <string name="stremio_sync_summary">When you stop, the position is saved in your Stremio library</string>
 </resources>
