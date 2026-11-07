@@ -263,6 +263,7 @@ public final class AutoSubs implements Player.Listener {
         lastDurationMs = -1;
         startPositionMs = -1;
         mediaId = null;
+        resumeChecked = false;
     }
 
     /** Ask the player for an embedded text track up front (preferred languages, then English as sync reference). */
@@ -356,6 +357,7 @@ public final class AutoSubs implements Player.Listener {
         final MediaId id = mediaId;
         final long pos = lastPositionMs;
         final long dur = lastDurationMs;
+        if (id != null && pos >= 0 && dur > 0) prefs.setResume(id.videoId(), pos, finished || pos >= dur * 0.95);
         if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
         final boolean done = finished || pos >= dur * 0.95;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
@@ -380,6 +382,31 @@ public final class AutoSubs implements Player.Listener {
         }, "StremioSync");
         t.start();
         return true;
+    }
+
+    private boolean resumeChecked;
+
+    /**
+     * Stremio shows (and sends) its local copy of the progress until it syncs with the account, so right after
+     * stopping it can send an older position. If we know a later one for this video, continue there.
+     * A start from 0 is left alone: that can be a deliberate "play from the start".
+     */
+    private void checkResume() {
+        if (resumeChecked || mediaId == null || player == null || startPositionMs <= 0) return;
+        resumeChecked = true;
+        long saved = prefs.resume(mediaId.videoId());
+        long now = player.getCurrentPosition();
+        if (saved > startPositionMs + 10_000 && now < startPositionMs + 15_000) {
+            Log.i(TAG, "Resume: caller sent " + (startPositionMs / 1000) + "s, last stop was " + (saved / 1000) + "s");
+            player.seekTo(saved);
+            toast(activity.getString(R.string.autosubs_resumed, formatTime(saved)));
+        }
+    }
+
+    private static String formatTime(long ms) {
+        long s = ms / 1000;
+        return s >= 3600 ? String.format(Locale.ROOT, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+                : String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60);
     }
 
     // ---------------------------------------------------------------- search
@@ -427,7 +454,10 @@ public final class AutoSubs implements Player.Listener {
                 if (id == null) id = MediaIdentifier.lookup(info);
                 Log.i(TAG, "Id: " + id);
                 final MediaId foundId = id;
-                post(gen, () -> mediaId = foundId);
+                post(gen, () -> {
+                    mediaId = foundId;
+                    checkResume();
+                });
                 if (id == null) {
                     post(gen, () -> onSearchDone(Collections.emptyList()));
                     return;
@@ -872,7 +902,10 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onPlaybackStateChanged(int state) {
         Log.i(TAG, "Player state " + state + " " + sinceAttach());
-        if (state == Player.STATE_READY && startPositionMs < 0 && player != null) startPositionMs = player.getCurrentPosition();
+        if (state == Player.STATE_READY && startPositionMs < 0 && player != null) {
+            startPositionMs = player.getCurrentPosition();
+            checkResume();
+        }
         if (state == Player.STATE_READY && !indexRequested && owning) fetchIndex();
         if (state == Player.STATE_READY && pending != null) {
             activate(pending, pendingTrack, pendingAuto);

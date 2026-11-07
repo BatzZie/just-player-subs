@@ -68,4 +68,5 @@
     <string name="stremio_sync">Send watch progress to Stremio</string>
     <string name="stremio_sync_summary">When you stop, the position is saved in your Stremio library</string>
     <string name="stremio_next">Next</string>
+    <string name="autosubs_resumed">Continuing at %s</string>
 </resources>

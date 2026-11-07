@@ -117,6 +117,28 @@ final class AutoSubsPrefs {
         if (fileKey != null) files.edit().remove("offset:" + fileKey).remove("offsetUser:" + fileKey).apply();
     }
 
+    /** Last position where the user stopped this video ("tt123:S:E"), with the time it was saved. */
+    void setResume(String videoId, long positionMs, boolean finished) {
+        if (videoId == null) return;
+        if (finished) files.edit().remove("resume:" + videoId).apply();
+        else files.edit().putString("resume:" + videoId, positionMs + "," + System.currentTimeMillis()).apply();
+    }
+
+    /** @return saved position, or -1 if none (or older than 30 days) */
+    long resume(String videoId) {
+        if (videoId == null) return -1;
+        String v = files.getString("resume:" + videoId, null);
+        if (v == null) return -1;
+        try {
+            String[] parts = v.split(",");
+            long saved = Long.parseLong(parts[1]);
+            if (System.currentTimeMillis() - saved > 30L * 24 * 3600_000L) return -1;
+            return Long.parseLong(parts[0]);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
     String choice(String fileKey) {
         return fileKey == null ? null : files.getString("choice:" + fileKey, null);
     }
