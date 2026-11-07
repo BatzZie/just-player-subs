@@ -46,6 +46,7 @@ public final class LaunchTransition implements Player.Listener {
         if (Build.VERSION.SDK_INT >= 30 && fromStremio) {
             t.waiting = true;
             content(activity).setAlpha(0f);
+            t.setSpinnerHidden(true);
             t.main.postDelayed(() -> t.reveal("timeout"), TIMEOUT_MS);
             Log.i(AutoSubs.TAG, "Launched by " + caller + ": showing its loading screen until the first frame");
         } else {
@@ -60,7 +61,14 @@ public final class LaunchTransition implements Player.Listener {
 
     @Override
     public void onRenderedFirstFrame() {
+        setSpinnerHidden(false);
         reveal("first frame");
+    }
+
+    /** For a seamless start: no loading spinner on black between the loading screen and the first frame. */
+    private void setSpinnerHidden(boolean hidden) {
+        View spinner = activity.findViewById(com.brouken.player.R.id.loading);
+        if (spinner != null) spinner.setAlpha(hidden ? 0f : 1f);
     }
 
     /**
@@ -94,6 +102,7 @@ public final class LaunchTransition implements Player.Listener {
 
     /** Also used when the player has nothing to show (e.g. no media). */
     void reveal(String why) {
+        if (!"Dolby Vision".equals(why) && !"HDR".equals(why)) setSpinnerHidden(false);
         if (!waiting) return;
         waiting = false;
         main.removeCallbacksAndMessages(null);

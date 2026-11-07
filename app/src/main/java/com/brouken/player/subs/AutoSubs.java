@@ -202,7 +202,6 @@ public final class AutoSubs implements Player.Listener {
         if (skin != null) skin.onPlayerStarted(player);
 
         if (uri == null || !uri.equals(mediaUri)) {
-            stremioSyncToken.incrementAndGet();
             reset();
             mediaUri = uri;
             startSearch();
@@ -223,6 +222,14 @@ public final class AutoSubs implements Player.Listener {
             startTicking();
             if (syncWanted) scheduleSyncCheck();
         }
+    }
+
+    /**
+     * The player screen is closing. Android only stops it once the app below (Stremio) is idle, which can take
+     * a while; pause now so the audio doesn't keep playing behind Stremio.
+     */
+    public void onFinish() {
+        if (player != null) player.pause();
     }
 
     public void detach() {
@@ -452,10 +459,12 @@ public final class AutoSubs implements Player.Listener {
      * A start from 0 is left alone: that can be a deliberate "play from the start".
      */
     private void checkResume() {
-        if (resumeChecked || mediaId == null || player == null || startPositionMs <= 0) return;
+        if (resumeChecked || mediaId == null || player == null || startPositionMs < 0) return;
         resumeChecked = true;
         long saved = prefs.resume(mediaId.videoId());
         long now = player.getCurrentPosition();
+        // Stremio may send 0 (its stale copy) right after a stop; trust our own stop if it is recent
+        if (startPositionMs == 0 && !prefs.resumeIsRecent(mediaId.videoId(), 12 * 3600_000L)) return;
         if (saved > startPositionMs + 10_000 && now < startPositionMs + 15_000) {
             Log.i(TAG, "Resume: caller sent " + (startPositionMs / 1000) + "s, last stop was " + (saved / 1000) + "s");
             player.seekTo(saved);

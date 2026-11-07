@@ -792,6 +792,7 @@ public class PlayerActivity extends Activity {
             else setResult(Activity.RESULT_CANCELED);
         }
 
+        autoSubs.onFinish();
         super.finish();
     }
 
