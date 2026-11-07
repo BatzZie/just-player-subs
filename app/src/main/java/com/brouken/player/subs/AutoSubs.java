@@ -346,8 +346,17 @@ public final class AutoSubs implements Player.Listener {
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
         boolean syncing = reportToStremio(finished);
-        if (syncing) Log.i(TAG, "Result not sent to the caller (Stremio sync is active)");
-        return !syncing;
+        if (syncing) {
+            // Experiment: Stremio marks a video watched after an MX Player style result. Answer in VLC's format
+            // instead (Stremio parses that separately); our account write stays as a backup.
+            intent.setAction("org.videolan.vlc.player.result");
+            intent.removeExtra("position");
+            intent.removeExtra("duration");
+            intent.removeExtra("end_by");
+            Log.i(TAG, "Result sent in VLC format: extra_position=" + intent.getLongExtra("extra_position", -1)
+                    + " extra_duration=" + intent.getLongExtra("extra_duration", -1));
+        }
+        return true;
     }
 
     /**
@@ -892,6 +901,7 @@ public final class AutoSubs implements Player.Listener {
                 }
             }
             final SubtitleCandidate chosen = best;
+            dumpSyncData(refs, alternatives, tracks, scales);
             Log.i(TAG, "Index sync of " + alternatives.size() + " subtitle(s) took " + (SystemClock.elapsedRealtime() - t0) + " ms");
             post(gen, () -> {
                 if (activeTrack != currentTrack) return;
@@ -917,6 +927,41 @@ public final class AutoSubs implements Player.Listener {
                 }
             });
         });
+    }
+
+    /**
+     * Writes the sync reference and candidate subtitle times (no URLs or tokens) to the app's external files dir,
+     * readable over adb, so sync problems can be analysed on a computer.
+     */
+    private void dumpSyncData(List<Long> refs, List<SubtitleCandidate> alternatives, Map<String, SubtitleTrack> tracks,
+                              Map<String, Double> scales) {
+        try {
+            java.io.File dir = new java.io.File(activity.getExternalFilesDir(null), "sync-debug");
+            if (!dir.isDirectory() && !dir.mkdirs()) return;
+            String name = (mediaId != null ? mediaId.videoId() : String.valueOf(fileName)).replaceAll("[^A-Za-z0-9._-]", "_");
+            StringBuilder sb = new StringBuilder("{\"file\":").append(org.json.JSONObject.quote(String.valueOf(fileName)))
+                    .append(",\"refs\":").append(new org.json.JSONArray(refs)).append(",\"subs\":{");
+            boolean first = true;
+            for (SubtitleCandidate c : alternatives) {
+                SubtitleTrack t = tracks.get(c.id);
+                if (t == null) continue;
+                if (!first) sb.append(',');
+                first = false;
+                long[] starts = t.startTimesMs();
+                org.json.JSONArray a = new org.json.JSONArray();
+                for (long v : starts) a.put(v);
+                sb.append(org.json.JSONObject.quote(c.id + " " + c.releaseName)).append(":{\"scale\":")
+                        .append(scales.get(c.id)).append(",\"starts\":").append(a).append('}');
+            }
+            sb.append("}}");
+            java.io.File out = new java.io.File(dir, name + ".json");
+            try (java.io.FileOutputStream os = new java.io.FileOutputStream(out)) {
+                os.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            Log.i(TAG, "Sync data written to " + out.getAbsolutePath());
+        } catch (Exception e) {
+            Log.w(TAG, "Sync data dump failed: " + e);
+        }
     }
 
     private static double fitOf(AutoSync.Result single, autosubs.core.SegmentSync.Result seg) {
