@@ -81,7 +81,15 @@ public final class PlayerSkin {
         // Time to the right, buttons to the left
         setGravity(playerView.findViewById(R.id.exo_time), Gravity.CENTER_VERTICAL | Gravity.END);
         setGravity(playerView.findViewById(R.id.exo_basic_controls), Gravity.CENTER_VERTICAL | Gravity.START);
-        setGravity(playerView.findViewById(R.id.controls_scroll_view), Gravity.BOTTOM | Gravity.START);
+        View scroll = playerView.findViewById(R.id.controls_scroll_view);
+        setGravity(scroll, Gravity.BOTTOM | Gravity.START);
+        // Media3's own (hidden) buttons come first in the row and take up space: put ours in front
+        if (scroll != null && scroll.getParent() instanceof ViewGroup) {
+            ViewGroup row = (ViewGroup) scroll.getParent();
+            row.removeView(scroll);
+            row.addView(scroll, 0);
+            row.setPadding(dp(16), row.getPaddingTop(), row.getPaddingRight(), row.getPaddingBottom());
+        }
         LinearLayout controls = playerView.findViewById(R.id.controls);
         if (controls != null) {
             setGravity(controls, Gravity.BOTTOM | Gravity.START);
