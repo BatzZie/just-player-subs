@@ -119,6 +119,8 @@ public final class AutoSubs implements Player.Listener {
     private SubtitleTrack activeTrack;
     private double scale = 1.0;
     private long offsetMs;
+    /** Piecewise offsets (different cut); offsetMs is then a manual correction on top. */
+    private autosubs.core.SegmentSync.Result segments;
 
     // Waiting for the player to become ready (duration and frame rate are needed for activation)
     private SubtitleCandidate pending;
@@ -600,6 +602,7 @@ public final class AutoSubs implements Player.Listener {
         active = c;
         activeTrack = track;
         activeAuto = auto;
+        segments = null;
         if (skin != null) skin.setSubtitleLanguage(c.lang);
         embeddedChosen = false;
         userOff = false;
@@ -627,6 +630,7 @@ public final class AutoSubs implements Player.Listener {
 
     private void deactivate() {
         if (skin != null) skin.setSubtitleLanguage(null);
+        segments = null;
         active = null;
         activeTrack = null;
         syncWanted = false;
@@ -837,6 +841,7 @@ public final class AutoSubs implements Player.Listener {
             Map<String, SubtitleTrack> tracks = new HashMap<>();
             Map<String, Double> scales = new HashMap<>();
             Map<String, AutoSync.Result> results = new HashMap<>();
+            Map<String, autosubs.core.SegmentSync.Result> segResults = new HashMap<>();
             for (SubtitleCandidate c : alternatives) {
                 SubtitleTrack t = known.get(c.id);
                 if (t == null) {
@@ -856,11 +861,23 @@ public final class AutoSubs implements Player.Listener {
                 tracks.put(c.id, t);
                 scales.put(c.id, sc);
                 if (r != null) results.put(c.id, r);
+                // No clear single offset: maybe a different cut (recap, extra scene) -> offsets per part
+                if (r == null || r.fit() < 0.5) {
+                    autosubs.core.SegmentSync.Result seg = autosubs.core.SegmentSync.estimate(refs, t.startTimesMs(), sc);
+                    if (seg != null && (r == null || seg.fit() > r.fit())) {
+                        Log.i(TAG, "Piecewise fit " + String.format(Locale.ROOT, "%.2f", seg.fit()) + " " + seg + ": " + c);
+                        segResults.put(c.id, seg);
+                    }
+                }
             }
             SubtitleCandidate best = null;
+            double bestFit = 0;
             for (SubtitleCandidate c : alternatives) {
-                AutoSync.Result r = results.get(c.id);
-                if (r != null && (best == null || r.fit() > results.get(best.id).fit())) best = c;
+                double f = fitOf(results.get(c.id), segResults.get(c.id));
+                if (f > 0 && (best == null || f > bestFit)) {
+                    best = c;
+                    bestFit = f;
+                }
             }
             final SubtitleCandidate chosen = best;
             Log.i(TAG, "Index sync of " + alternatives.size() + " subtitle(s) took " + (SystemClock.elapsedRealtime() - t0) + " ms");
@@ -868,9 +885,14 @@ public final class AutoSubs implements Player.Listener {
                 if (activeTrack != currentTrack) return;
                 for (Map.Entry<String, SubtitleTrack> e : tracks.entrySet()) trackCache.put(e.getKey(), e.getValue());
                 AutoSync.Result cur = results.get(current.id);
-                double curFit = cur == null ? 0 : cur.fit();
-                if (chosen != null && chosen != current && results.get(chosen.id).fit() >= curFit + BETTER_FIT) {
-                    switchTo(chosen, tracks.get(chosen.id), scales.get(chosen.id), results.get(chosen.id).offsetMs);
+                double curFit = fitOf(cur, segResults.get(current.id));
+                if (chosen != null && chosen != current && fitOf(results.get(chosen.id), segResults.get(chosen.id)) >= curFit + BETTER_FIT) {
+                    AutoSync.Result r = results.get(chosen.id);
+                    autosubs.core.SegmentSync.Result seg = segResults.get(chosen.id);
+                    switchTo(chosen, tracks.get(chosen.id), scales.get(chosen.id), seg != null || r == null ? 0 : r.offsetMs);
+                    if (seg != null) applySegments(seg);
+                } else if (segResults.get(current.id) != null) {
+                    applySegments(segResults.get(current.id));
                 } else if (cur != null) {
                     finishSync(cur.offsetMs);
                 } else if (manual) {
@@ -878,6 +900,24 @@ public final class AutoSubs implements Player.Listener {
                 }
             });
         });
+    }
+
+    private static double fitOf(AutoSync.Result single, autosubs.core.SegmentSync.Result seg) {
+        double f = single == null ? 0 : single.fit();
+        if (seg != null) f = Math.max(f, seg.fit());
+        return f;
+    }
+
+    /** Different cut: offsets per part of the video. A manual timing change still applies on top. */
+    private void applySegments(autosubs.core.SegmentSync.Result seg) {
+        syncWanted = false;
+        main.removeCallbacks(syncCheck);
+        segments = seg;
+        offsetMs = 0;
+        prefs.setOffset(fileKey, 0, false);
+        Log.i(TAG, "Piecewise sync active: " + seg);
+        render(true);
+        toast(activity.getString(R.string.autosubs_sync_segments, seg.segments.size()));
     }
 
     /** Replaces the automatically picked subtitle by one that fits the video better, already in sync. */
@@ -888,6 +928,7 @@ public final class AutoSubs implements Player.Listener {
         active = c;
         activeTrack = track;
         activeAuto = true;
+        segments = null;
         if (skin != null) skin.setSubtitleLanguage(c.lang);
         scale = newScale;
         offsetMs = offset;
@@ -970,8 +1011,9 @@ public final class AutoSubs implements Player.Listener {
         if (player == null || playerView == null) return;
         SubtitleView view = playerView.getSubtitleView();
         if (view == null) return;
+        long pos = player.getCurrentPosition();
         List<Cue> cues = activeTrack == null ? Collections.emptyList()
-                : activeTrack.cuesAt(player.getCurrentPosition(), scale, offsetMs);
+                : activeTrack.cuesAt(pos, scale, offsetMs + (segments != null ? segments.offsetAt(pos) : 0));
         // Re-set now and then in case the player cleared the view
         if (force || !cues.equals(lastCues) || ++ticksSinceSet >= 10) {
             view.setCues(cues);

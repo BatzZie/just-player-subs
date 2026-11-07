@@ -69,4 +69,5 @@
     <string name="stremio_sync_summary">When you stop, the position is saved in your Stremio library</string>
     <string name="stremio_next">Next</string>
     <string name="autosubs_resumed">Continuing at %s</string>
+    <string name="autosubs_sync_segments">Subtitle synced in %d parts (different cut)</string>
 </resources>
