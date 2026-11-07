@@ -114,9 +114,11 @@ public final class PlayerSkin {
         View bar = playerView.findViewById(R.id.exo_progress);
         if (bar instanceof DefaultTimeBar) {
             DefaultTimeBar t = (DefaultTimeBar) bar;
+            timeBar = t;
             t.setPlayedColor(Color.WHITE);
             t.setScrubberColor(Color.WHITE);
-            t.setUnplayedColor(0x40FFFFFF);
+            t.setUnplayedColor(0x33FFFFFF);
+            t.setBufferedColor(0x80FFFFFF);
         }
 
         // Title: no bar behind it, larger text with a second info line
@@ -127,6 +129,13 @@ public final class PlayerSkin {
             titleView.setShadowLayer(dp(3), 0, dp(1), 0xAA000000);
             titleView.setPadding(dp(28), dp(22), dp(28), dp(8));
         }
+    }
+
+    private DefaultTimeBar timeBar;
+
+    /** Just Player sets the buffered color for every new video; tone it down so the played part stands out. */
+    public void onPlayerStarted() {
+        if (timeBar != null) timeBar.setBufferedColor(0x80FFFFFF);
     }
 
     /** White rounded "pill" behind the focused button, with a dark icon. */
