@@ -34,3 +34,10 @@
 -keepclassmembers class androidx.media3.ui.PlayerControlView {
     private androidx.media3.ui.TrackNameProvider trackNameProvider;
 }
+
+# Just Player Subs: PlayerSkin draws the time bar with rounded ends (reads these rects)
+-keepclassmembers class androidx.media3.ui.DefaultTimeBar {
+    private android.graphics.Rect progressBar;
+    private android.graphics.Rect bufferedBar;
+    private android.graphics.Rect scrubberBar;
+}

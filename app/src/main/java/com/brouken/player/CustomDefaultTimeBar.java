@@ -46,6 +46,12 @@ class CustomDefaultTimeBar extends DefaultTimeBar {
     }
 
     @Override
+    public void onDraw(android.graphics.Canvas canvas) {
+        com.brouken.player.subs.PlayerSkin.drawTimeBar(this, canvas);
+        super.onDraw(canvas);
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (event.getAction() == MotionEvent.ACTION_DOWN && scrubberBar != null) {
             scrubbing = false;

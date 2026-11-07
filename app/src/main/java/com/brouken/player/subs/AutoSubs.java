@@ -907,7 +907,7 @@ public final class AutoSubs implements Player.Listener {
 
     /** @return true if the key was used for timing adjustment. */
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (!timingMode) return false;
+        if (!timingMode) return skin != null && skin.dispatchKeyEvent(event);
         int key = event.getKeyCode();
         long delta;
         switch (key) {

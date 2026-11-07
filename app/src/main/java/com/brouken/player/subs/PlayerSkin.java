@@ -3,7 +3,11 @@ package com.brouken.player.subs;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -18,6 +22,7 @@ import android.text.style.AbsoluteSizeSpan;
 import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -31,6 +36,8 @@ import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.util.Util;
+import androidx.media3.ui.TimeBar;
 import androidx.media3.ui.DefaultTimeBar;
 import androidx.media3.ui.PlayerView;
 import androidx.preference.PreferenceManager;
@@ -69,6 +76,23 @@ public final class PlayerSkin {
     private TextView timeRight;
     private DefaultTimeBar timeBar;
     private Player player;
+    private ImageButton playButton;
+    private LinearLayout controls;
+    private boolean scrubbing;
+    private int barBottomSet = -1;
+
+    /** The skin that draws the rounded time bar (static: called from CustomDefaultTimeBar.onDraw). */
+    private static PlayerSkin drawing;
+    private static java.lang.reflect.Field progressField, bufferedField, scrubberField;
+    private final Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF barRect = new RectF();
+
+    private final Player.Listener playerListener = new Player.Listener() {
+        @Override
+        public void onEvents(Player p, Player.Events events) {
+            updatePlayButton();
+        }
+    };
 
     private PlayerSkin(Activity activity, TextView titleView) {
         this.activity = activity;
@@ -122,6 +146,7 @@ public final class PlayerSkin {
             scroll.setPaddingRelative(0, scroll.getPaddingTop(), dp(16), scroll.getPaddingBottom());
         }
         LinearLayout controls = playerView.findViewById(R.id.controls);
+        this.controls = controls;
         if (controls != null) {
             setGravity(controls, Gravity.CENTER_VERTICAL | Gravity.START);
             // "Open file" is rarely used with streams: move it to the end
@@ -136,6 +161,7 @@ public final class PlayerSkin {
                 if (child instanceof ImageButton) styleButton((ImageButton) child);
             }
             addSubtitleBadge(controls, playerView.findViewById(R.id.exo_subtitle));
+            controls.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> linkFocus());
         }
 
         // Thin accent time bar with the times left and right of it
@@ -144,10 +170,23 @@ public final class PlayerSkin {
         View bar = playerView.findViewById(R.id.exo_progress);
         if (bar instanceof DefaultTimeBar) {
             timeBar = (DefaultTimeBar) bar;
-            timeBar.setPlayedColor(accent);
-            timeBar.setScrubberColor(accent);
-            timeBar.setUnplayedColor(0x40FFFFFF);
-            timeBar.setBufferedColor(0x66FFFFFF);
+            enableRoundedBar();
+            setBarColors();
+            timeBar.addListener(new TimeBar.OnScrubListener() {
+                @Override
+                public void onScrubStart(TimeBar t, long position) {
+                    scrubbing = true;
+                }
+
+                @Override
+                public void onScrubMove(TimeBar t, long position) {
+                }
+
+                @Override
+                public void onScrubStop(TimeBar t, long position, boolean canceled) {
+                    scrubbing = false;
+                }
+            });
             addTimeLabels(timeBar);
         }
 
@@ -161,27 +200,133 @@ public final class PlayerSkin {
         }
     }
 
-    /** The big play button in the middle becomes the first button of the bottom row (the loader stays centered). */
+    /**
+     * Replaces the big play button in the middle by our own play/pause button as first button of the bottom row.
+     * Just Player hides its button while a video loads; ours is always there. Ours takes over the view id, so
+     * Just Player's "focus the play button when the controls appear" now focuses it. The loader stays centered.
+     */
     private void movePlayPauseIntoRow(PlayerView playerView, LinearLayout controls) {
-        View playPause = playerView.findViewById(R.id.exo_play_pause);
-        if (!(playPause instanceof ImageButton) || !(playPause.getParent() instanceof ViewGroup)) return;
-        View template = null;
+        View original = playerView.findViewById(R.id.exo_play_pause);
+        if (original != null && original.getParent() instanceof ViewGroup) {
+            ((ViewGroup) original.getParent()).removeView(original);
+            original.setId(View.NO_ID);
+        }
+        playButton = new ImageButton(activity);
+        playButton.setId(R.id.exo_play_pause);
+        playButton.setImageResource(R.drawable.exo_styled_controls_play);
+        playButton.setContentDescription(activity.getString(R.string.exo_controls_play_description));
+        playButton.setFocusable(true);
+        playButton.setOnClickListener(v -> {
+            if (player != null) Util.handlePlayPauseButtonAction(player);
+        });
+        controls.addView(playButton, 0);
+    }
+
+    private void updatePlayButton() {
+        if (playButton == null || player == null) return;
+        boolean showPlay = Util.shouldShowPlayButton(player);
+        playButton.setImageResource(showPlay ? R.drawable.exo_styled_controls_play : R.drawable.exo_styled_controls_pause);
+        playButton.setContentDescription(activity.getString(showPlay
+                ? R.string.exo_controls_play_description : R.string.exo_controls_pause_description));
+    }
+
+    /**
+     * Left/right stays within the button row (it used to jump to the time bar), up goes to the time bar and down
+     * from the time bar comes back to the play button.
+     */
+    private void linkFocus() {
+        if (controls == null) return;
+        List<View> buttons = new ArrayList<>();
         for (int i = 0; i < controls.getChildCount(); i++) {
-            if (controls.getChildAt(i) instanceof ImageButton) {
-                template = controls.getChildAt(i);
-                break;
+            View v = controls.getChildAt(i);
+            if (v.getVisibility() == View.VISIBLE && v.isFocusable()) {
+                if (v.getId() == View.NO_ID) v.setId(View.generateViewId());
+                buttons.add(v);
             }
         }
-        ((ViewGroup) playPause.getParent()).removeView(playPause);
-        LinearLayout.LayoutParams lp = template != null && template.getLayoutParams() != null
-                ? new LinearLayout.LayoutParams(template.getLayoutParams().width, template.getLayoutParams().height)
-                : new LinearLayout.LayoutParams(dp(48), dp(48));
-        ImageButton b = (ImageButton) playPause;
-        if (template != null) {
-            b.setPadding(template.getPaddingLeft(), template.getPaddingTop(), template.getPaddingRight(), template.getPaddingBottom());
+        for (int i = 0; i < buttons.size(); i++) {
+            View v = buttons.get(i);
+            v.setNextFocusLeftId(buttons.get(Math.max(0, i - 1)).getId());
+            v.setNextFocusRightId(buttons.get(Math.min(buttons.size() - 1, i + 1)).getId());
+            v.setNextFocusDownId(v.getId());
+            if (timeBar != null) v.setNextFocusUpId(timeBar.getId());
         }
-        b.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-        controls.addView(b, 0, lp);
+        if (timeBar != null && !buttons.isEmpty()) {
+            timeBar.setNextFocusDownId(playButton != null ? playButton.getId() : buttons.get(0).getId());
+        }
+    }
+
+    /** OK on the time bar plays/pauses (while scrubbing with left/right it confirms the new position). */
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (!enabled || timeBar == null || !timeBar.isFocused() || player == null || scrubbing) return false;
+        int key = event.getKeyCode();
+        if (key != KeyEvent.KEYCODE_DPAD_CENTER && key != KeyEvent.KEYCODE_ENTER
+                && key != KeyEvent.KEYCODE_NUMPAD_ENTER && key != KeyEvent.KEYCODE_BUTTON_A) return false;
+        if (event.getAction() == KeyEvent.ACTION_UP) Util.handlePlayPauseButtonAction(player);
+        return true;
+    }
+
+    // ---------------------------------------------------------------- rounded time bar
+
+    /**
+     * Called from CustomDefaultTimeBar.onDraw before the default drawing. Draws the bar with rounded ends;
+     * the default bar colors are transparent, so Media3 only adds the scrubber on top.
+     */
+    public static void drawTimeBar(DefaultTimeBar bar, Canvas canvas) {
+        PlayerSkin skin = drawing;
+        if (skin == null || bar != skin.timeBar || progressField == null) return;
+        try {
+            Rect progress = (Rect) progressField.get(bar);
+            Rect buffered = (Rect) bufferedField.get(bar);
+            Rect played = (Rect) scrubberField.get(bar);
+            if (progress == null || progress.width() <= 0) return;
+            float r = progress.height() / 2f;
+            skin.barPaint.setColor(0x40FFFFFF);
+            skin.barRect.set(progress);
+            canvas.drawRoundRect(skin.barRect, r, r, skin.barPaint);
+            if (buffered != null && buffered.right > progress.left) {
+                skin.barPaint.setColor(0x59FFFFFF);
+                skin.barRect.set(progress.left, progress.top, Math.min(buffered.right, progress.right), progress.bottom);
+                canvas.drawRoundRect(skin.barRect, r, r, skin.barPaint);
+            }
+            if (played != null && played.right > progress.left) {
+                skin.barPaint.setColor(skin.accent);
+                skin.barRect.set(progress.left, progress.top, Math.min(played.right, progress.right), progress.bottom);
+                canvas.drawRoundRect(skin.barRect, r, r, skin.barPaint);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private boolean enableRoundedBar() {
+        try {
+            progressField = DefaultTimeBar.class.getDeclaredField("progressBar");
+            bufferedField = DefaultTimeBar.class.getDeclaredField("bufferedBar");
+            scrubberField = DefaultTimeBar.class.getDeclaredField("scrubberBar");
+            progressField.setAccessible(true);
+            bufferedField.setAccessible(true);
+            scrubberField.setAccessible(true);
+            drawing = this;
+            return true;
+        } catch (Exception e) {
+            progressField = null;
+            return false;
+        }
+    }
+
+    private void setBarColors() {
+        if (timeBar == null) return;
+        timeBar.setScrubberColor(accent);
+        if (drawing == this && progressField != null) {
+            // We draw the bar ourselves (rounded)
+            timeBar.setPlayedColor(Color.TRANSPARENT);
+            timeBar.setBufferedColor(Color.TRANSPARENT);
+            timeBar.setUnplayedColor(Color.TRANSPARENT);
+        } else {
+            timeBar.setPlayedColor(accent);
+            timeBar.setBufferedColor(0x59FFFFFF);
+            timeBar.setUnplayedColor(0x40FFFFFF);
+        }
     }
 
     /** Rounded accent highlight behind the focused button. */
@@ -221,14 +366,26 @@ public final class PlayerSkin {
         barLp.rightMargin = side;
         bar.setLayoutParams(barLp);
         // Just Player resets the time bar margins whenever the window insets change: put ours back
+        final int extraBottom = dp(18);
+        barBottomSet = barLp.bottomMargin + extraBottom;
+        barLp.bottomMargin = barBottomSet;
+        bar.setLayoutParams(barLp);
         bar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if (!(v.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
             FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+            boolean changed = false;
             if (p.leftMargin != side || p.rightMargin != side) {
                 p.leftMargin = side;
                 p.rightMargin = side;
-                v.post(() -> v.setLayoutParams(p));
+                changed = true;
             }
+            // Just Player sets its own bottom margin when the insets change: keep extra room above the buttons
+            if (p.bottomMargin != barBottomSet) {
+                barBottomSet = p.bottomMargin + extraBottom;
+                p.bottomMargin = barBottomSet;
+                changed = true;
+            }
+            if (changed) v.post(() -> v.setLayoutParams(p));
             alignTimeLabels(p);
         });
         timeLeft = timeLabel(Gravity.END);
@@ -281,15 +438,20 @@ public final class PlayerSkin {
 
     /** Called for every new player (Just Player sets the time bar colors again for each video). */
     public void onPlayerStarted(Player player) {
+        if (this.player != null && this.player != player) this.player.removeListener(playerListener);
         this.player = player;
         if (!enabled) return;
-        if (timeBar != null) timeBar.setBufferedColor(0x66FFFFFF);
+        player.addListener(playerListener);
+        updatePlayButton();
+        setBarColors();
+        linkFocus();
         main.removeCallbacks(tick);
         if (timeLeft != null) main.post(tick);
     }
 
     public void onPlayerStopped() {
         main.removeCallbacks(tick);
+        if (player != null) player.removeListener(playerListener);
         player = null;
     }
 
