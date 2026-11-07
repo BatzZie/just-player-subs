@@ -351,6 +351,18 @@ public final class AutoSubs implements Player.Listener {
         }
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
+        if (finished && prefs.stremioAuthKeyForSync() != null) {
+            // Watched to the end: Stremio handles a completion result correctly (marks it watched and starts the
+            // next episode). Don't write the account ourselves, that could undo Stremio's move to the next episode.
+            intent.removeExtra("position");
+            intent.removeExtra("duration");
+            intent.removeExtra("extra_position");
+            intent.removeExtra("extra_duration");
+            intent.putExtra("end_by", "playback_completion");
+            if (mediaId != null) prefs.setResume(mediaId.videoId(), 0, true);
+            Log.i(TAG, "Result for the caller: playback completed (Stremio marks it watched itself)");
+            return true;
+        }
         if (STREMIO_RESULT_WITHOUT_DURATION) {
             // Stremio (Android TV) decides "watched" with duration / position > 0.7 (inverted ratio), so any result
             // with a duration marks the video watched. Without a duration that check gives 0 and Stremio just stores

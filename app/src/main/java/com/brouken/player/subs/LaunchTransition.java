@@ -10,7 +10,11 @@ import android.util.Log;
 import android.view.View;
 
 import androidx.annotation.NonNull;
+import androidx.media3.common.C;
+import androidx.media3.common.Format;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Tracks;
 import androidx.media3.common.Player;
 
 /**
@@ -57,6 +61,30 @@ public final class LaunchTransition implements Player.Listener {
     @Override
     public void onRenderedFirstFrame() {
         reveal("first frame");
+    }
+
+    /**
+     * HDR / Dolby Vision: the TV switches picture mode when the video starts. With Stremio's loading screen still
+     * visible that flickers (seen with Dolby Vision), so show black from here, like before, and let the switch
+     * happen on a black screen.
+     */
+    @Override
+    public void onTracksChanged(@NonNull Tracks tracks) {
+        if (!waiting) return;
+        for (Tracks.Group g : tracks.getGroups()) {
+            if (g.getType() != C.TRACK_TYPE_VIDEO || !g.isSelected()) continue;
+            for (int i = 0; i < g.length; i++) {
+                if (!g.isTrackSelected(i)) continue;
+                Format f = g.getTrackFormat(i);
+                String codecs = f.codecs == null ? "" : f.codecs;
+                boolean dolbyVision = MimeTypes.VIDEO_DOLBY_VISION.equals(f.sampleMimeType)
+                        || codecs.startsWith("dvh") || codecs.startsWith("dva");
+                boolean hdr = f.colorInfo != null && (f.colorInfo.colorTransfer == C.COLOR_TRANSFER_ST2084
+                        || f.colorInfo.colorTransfer == C.COLOR_TRANSFER_HLG);
+                if (dolbyVision || hdr) reveal(dolbyVision ? "Dolby Vision" : "HDR");
+                return;
+            }
+        }
     }
 
     @Override
