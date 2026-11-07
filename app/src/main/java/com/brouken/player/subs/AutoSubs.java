@@ -10,6 +10,8 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -627,7 +629,7 @@ public final class AutoSubs implements Player.Listener {
                 + " offset=" + offsetMs + " referenceCues=" + sync.collected());
         startTicking();
 
-        String msg = activity.getString(R.string.autosubs_loaded, c.label());
+        String msg = activity.getString(R.string.autosubs_loaded, shortLabel(c));
         if (scale != 1.0) msg += " (" + activity.getString(R.string.autosubs_fps_corrected) + ")";
         toast(msg);
 
@@ -994,7 +996,7 @@ public final class AutoSubs implements Player.Listener {
         prefs.setOffset(fileKey, offsetMs, false);
         sync.resetAgreement();
         render(true);
-        toast(activity.getString(R.string.autosubs_loaded, c.label()));
+        toast(activity.getString(R.string.autosubs_loaded, shortLabel(c)));
     }
 
     // ---------------------------------------------------------------- Player.Listener
@@ -1272,8 +1274,65 @@ public final class AutoSubs implements Player.Listener {
         });
     }
 
+    private TextView notice;
+    private final Runnable hideNotice = () -> {
+        if (notice != null) notice.animate().alpha(0f).setDuration(300).withEndAction(() -> notice.setVisibility(View.GONE)).start();
+    };
+
+    /**
+     * Small message top right in the player (Android's toast covered the subtitles). Falls back to a toast when
+     * there is no player view.
+     */
     private void toast(String text) {
-        Toast.makeText(activity, text, Toast.LENGTH_LONG).show();
+        FrameLayout frame = playerView == null ? null : playerView.getOverlayFrameLayout();
+        if (frame == null) {
+            Toast.makeText(activity, text, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (notice == null) {
+            notice = new TextView(activity);
+            notice.setTextColor(Color.WHITE);
+            notice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            notice.setMaxLines(2);
+            notice.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            notice.setMaxWidth(activity.getResources().getDisplayMetrics().widthPixels * 2 / 5);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(0xA6000000);
+            bg.setCornerRadius(dp(10));
+            notice.setBackground(bg);
+            notice.setPadding(dp(12), dp(7), dp(12), dp(7));
+            notice.setVisibility(View.GONE);
+        }
+        if (notice.getParent() != frame) {
+            if (notice.getParent() instanceof ViewGroup) ((ViewGroup) notice.getParent()).removeView(notice);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+            lp.topMargin = dp(20);
+            lp.rightMargin = dp(24);
+            frame.addView(notice, lp);
+        }
+        notice.setText(text);
+        notice.animate().cancel();
+        if (notice.getVisibility() != View.VISIBLE) {
+            notice.setAlpha(0f);
+            notice.setVisibility(View.VISIBLE);
+        }
+        notice.animate().alpha(1f).setDuration(150).start();
+        main.removeCallbacks(hideNotice);
+        main.postDelayed(hideNotice, 3500);
+    }
+
+    /** "NL · 1080p WEB · NTb" */
+    private static String shortLabel(SubtitleCandidate c) {
+        List<String> parts = new ArrayList<>();
+        String iso1 = Languages.toIso1(c.lang);
+        parts.add(iso1 != null ? iso1.toUpperCase(Locale.ROOT) : String.valueOf(c.lang));
+        String what = ((c.release.resolution != null ? c.release.resolution + " " : "")
+                + (c.release.source != null ? c.release.source : "")).trim();
+        if (!what.isEmpty()) parts.add(what);
+        if (c.release.group != null) parts.add(c.release.group);
+        if (parts.size() == 1 && c.releaseName != null) parts.add(c.releaseName);
+        return android.text.TextUtils.join(" · ", parts);
     }
 
     private int dp(int value) {

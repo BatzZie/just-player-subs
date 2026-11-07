@@ -8,7 +8,7 @@
     <string name="autosubs_status_error">search failed</string>
     <string name="autosubs_status_disabled">automatic search is off</string>
     <string name="autosubs_status_unsupported">not available for this video</string>
-    <string name="autosubs_item_choose">Subtitle: %s</string>
+    <string name="autosubs_item_choose">Subtitle %s</string>
     <string name="autosubs_off">Off</string>
     <string name="autosubs_none">None</string>
     <string name="autosubs_item_timing">Adjust timing (%s)</string>
@@ -18,12 +18,12 @@
     <string name="autosubs_item_system">System caption settings</string>
     <string name="autosubs_choose_title">Choose subtitle</string>
     <string name="autosubs_timing_overlay">Subtitle timing: %1$s\n◀ earlier · later ▶ (0.5 s)   ▲ ▼ 0.1 s\nOK = done</string>
-    <string name="autosubs_loaded">Subtitle: %s</string>
+    <string name="autosubs_loaded">Subtitle %s</string>
     <string name="autosubs_fps_corrected">frame rate corrected</string>
     <string name="autosubs_embedded_used">Using built-in %s subtitle</string>
     <string name="autosubs_load_failed">Could not load subtitle</string>
-    <string name="autosubs_sync_started">Syncing with built-in subtitle… keep watching</string>
-    <string name="autosubs_sync_done">Subtitle synced (%s)</string>
+    <string name="autosubs_sync_started">Syncing with built-in subtitle…</string>
+    <string name="autosubs_sync_done">Synced %s</string>
     <string name="autosubs_sync_failed">Auto sync did not find a clear match. Use Adjust timing.</string>
     <string name="autosubs_sync_no_reference">This video has no built-in subtitle to sync with</string>
 
@@ -69,5 +69,5 @@
     <string name="stremio_sync_summary">When you stop, the position is saved in your Stremio library</string>
     <string name="stremio_next">Next</string>
     <string name="autosubs_resumed">Continuing at %s</string>
-    <string name="autosubs_sync_segments">Subtitle synced in %d parts (different cut)</string>
+    <string name="autosubs_sync_segments">Synced in %d parts (other cut)</string>
 </resources>

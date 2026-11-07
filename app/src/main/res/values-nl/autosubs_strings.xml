@@ -8,7 +8,7 @@
     <string name="autosubs_status_error">zoeken mislukt</string>
     <string name="autosubs_status_disabled">automatisch zoeken staat uit</string>
     <string name="autosubs_status_unsupported">niet beschikbaar voor deze video</string>
-    <string name="autosubs_item_choose">Ondertitel: %s</string>
+    <string name="autosubs_item_choose">Ondertitel %s</string>
     <string name="autosubs_off">Uit</string>
     <string name="autosubs_none">Geen</string>
     <string name="autosubs_item_timing">Timing aanpassen (%s)</string>
@@ -18,12 +18,12 @@
     <string name="autosubs_item_system">Systeeminstellingen ondertitels</string>
     <string name="autosubs_choose_title">Kies ondertitel</string>
     <string name="autosubs_timing_overlay">Ondertitel timing: %1$s\n◀ eerder · later ▶ (0,5 s)   ▲ ▼ 0,1 s\nOK = klaar</string>
-    <string name="autosubs_loaded">Ondertitel: %s</string>
+    <string name="autosubs_loaded">Ondertitel %s</string>
     <string name="autosubs_fps_corrected">framerate gecorrigeerd</string>
     <string name="autosubs_embedded_used">Ingebouwde ondertitel (%s) gebruikt</string>
     <string name="autosubs_load_failed">Ondertitel laden mislukt</string>
-    <string name="autosubs_sync_started">Synchroniseren met ingebouwde ondertitel… kijk gewoon door</string>
-    <string name="autosubs_sync_done">Ondertitel gesynchroniseerd (%s)</string>
+    <string name="autosubs_sync_started">Synchroniseren met ingebouwde ondertitel…</string>
+    <string name="autosubs_sync_done">Gesynchroniseerd %s</string>
     <string name="autosubs_sync_failed">Automatisch synchroniseren vond geen duidelijke match. Gebruik Timing aanpassen.</string>
     <string name="autosubs_sync_no_reference">Deze video heeft geen ingebouwde ondertitel om mee te synchroniseren</string>
 
@@ -69,5 +69,5 @@
     <string name="stremio_sync_summary">Bij stoppen wordt de positie in je Stremio-bibliotheek opgeslagen</string>
     <string name="stremio_next">Volgende</string>
     <string name="autosubs_resumed">Verder vanaf %s</string>
-    <string name="autosubs_sync_segments">Ondertitel in %d delen gesynchroniseerd (andere versie)</string>
+    <string name="autosubs_sync_segments">Gesynchroniseerd in %d delen (andere versie)</string>
 </resources>
