@@ -343,10 +343,22 @@ public final class AutoSubs implements Player.Listener {
             if (!intent.hasExtra("position") && lastPositionMs >= 0) intent.putExtra("position", (int) lastPositionMs);
             if (!intent.hasExtra("duration") && lastDurationMs > 0) intent.putExtra("duration", (int) lastDurationMs);
         }
-        if (intent.hasExtra("position")) intent.putExtra("extra_position", (long) intent.getIntExtra("position", 0));
-        if (intent.hasExtra("duration")) intent.putExtra("extra_duration", (long) intent.getIntExtra("duration", 0));
         Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
                 + " duration=" + intent.getIntExtra("duration", -1));
+        if (STREMIO_RESULT_WITHOUT_DURATION) {
+            // Stremio (Android TV) decides "watched" with duration / position > 0.7 (inverted ratio), so any result
+            // with a duration marks the video watched. Without a duration that check gives 0 and Stremio just stores
+            // the position itself; its core marks watched at 70% of the duration it knows, or via end_by.
+            intent.removeExtra("duration");
+            intent.removeExtra("extra_duration");
+            intent.removeExtra("extra_position");
+            if (mediaId != null && lastPositionMs >= 0 && lastDurationMs > 0) {
+                prefs.setResume(mediaId.videoId(), lastPositionMs, finished || lastPositionMs >= lastDurationMs * 0.95);
+            }
+            Log.i(TAG, "Result for the caller: MX format without duration, position=" + intent.getIntExtra("position", -1)
+                    + " end_by=" + intent.getStringExtra("end_by"));
+            return true;
+        }
         boolean syncing = reportToStremio(finished);
         // Tested: with any result (MX or VLC format) Stremio sometimes marks the video watched and jumps to the
         // next episode. Without a result it leaves the library alone; we write the progress to the account.
@@ -359,6 +371,12 @@ public final class AutoSubs implements Player.Listener {
      * ignores the result of external players it doesn't know and can overwrite the library when it comes back to
      * the front, so the write is repeated a few times.
      */
+    /**
+     * Test: let Stremio store the progress itself (result without duration) instead of writing it to the account.
+     * The account write (reportToStremio) stays available as a fallback.
+     */
+    private static final boolean STREMIO_RESULT_WITHOUT_DURATION = true;
+
     /** Each stop (and each new start) gets a new token; older background writes stop when they see a newer one. */
     private static final java.util.concurrent.atomic.AtomicLong stremioSyncToken = new java.util.concurrent.atomic.AtomicLong();
 
