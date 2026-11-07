@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="autosubs.core.SubtitleRankerTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-07T14:04:40.037Z" hostname="fedora" time="0.002">
+  <properties/>
+  <testcase name="languageFirstThenReleaseMatch()" classname="autosubs.core.SubtitleRankerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

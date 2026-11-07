@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="autosubs.core.FrameRateTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-07T14:04:40.008Z" hostname="fedora" time="0.004">
+  <properties/>
+  <testcase name="palSpeedUpFromMetadata()" classname="autosubs.core.FrameRateTest" time="0.001"/>
+  <testcase name="shortClipsAreLeftAlone()" classname="autosubs.core.FrameRateTest" time="0.001"/>
+  <testcase name="ignoresSmallRatios()" classname="autosubs.core.FrameRateTest" time="0.0"/>
+  <testcase name="noCorrectionForSameRate()" classname="autosubs.core.FrameRateTest" time="0.0"/>
+  <testcase name="subtitleTooLongForVideo()" classname="autosubs.core.FrameRateTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

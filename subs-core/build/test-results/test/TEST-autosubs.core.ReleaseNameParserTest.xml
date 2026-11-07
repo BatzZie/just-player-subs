@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="autosubs.core.ReleaseNameParserTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-07T14:04:40.015Z" hostname="fedora" time="0.01">
+  <properties/>
+  <testcase name="episodeWithGroup()" classname="autosubs.core.ReleaseNameParserTest" time="0.006"/>
+  <testcase name="movieWithYearInBrackets()" classname="autosubs.core.ReleaseNameParserTest" time="0.001"/>
+  <testcase name="alternativeEpisodeFormat()" classname="autosubs.core.ReleaseNameParserTest" time="0.0"/>
+  <testcase name="yearInTitle()" classname="autosubs.core.ReleaseNameParserTest" time="0.001"/>
+  <testcase name="webDlIsNotAGroup()" classname="autosubs.core.ReleaseNameParserTest" time="0.0"/>
+  <testcase name="groupWithTag()" classname="autosubs.core.ReleaseNameParserTest" time="0.001"/>
+  <testcase name="titleThatIsAYear()" classname="autosubs.core.ReleaseNameParserTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

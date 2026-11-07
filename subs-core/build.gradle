@@ -1,0 +1,27 @@
+// Platform independent subtitle logic (no Android dependencies), shared by the app and future desktop/client apps.
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:5.5.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0'
+    testImplementation 'org.jetbrains.kotlin:kotlin-test-junit5'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    // Optional local test data (subtitles from others, not in the repo)
+    systemProperty 'autosubs.testdata', System.getProperty('autosubs.testdata', "${System.getProperty('user.home')}/Desktop/justplayer/testdata")
+    testLogging { events 'failed', 'skipped'; exceptionFormat 'full'; showStandardStreams = true }
+}

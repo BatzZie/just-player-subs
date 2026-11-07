@@ -1,5 +1,7 @@
 package com.brouken.player.subs;
 
+import autosubs.core.Languages;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 

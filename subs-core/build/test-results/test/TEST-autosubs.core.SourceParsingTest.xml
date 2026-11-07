@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="autosubs.core.SourceParsingTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-07T14:04:40.026Z" hostname="fedora" time="0.01">
+  <properties/>
+  <testcase name="addonResponse()" classname="autosubs.core.SourceParsingTest" time="0.009"/>
+  <testcase name="openSubtitlesComResponse()" classname="autosubs.core.SourceParsingTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -26,7 +26,22 @@ import androidx.media3.common.text.CueGroup;
 import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.SubtitleView;
 
+import com.brouken.player.BuildConfig;
 import com.brouken.player.R;
+
+import autosubs.core.AutoSync;
+import autosubs.core.CoreLog;
+import autosubs.core.Languages;
+import autosubs.core.MediaId;
+import autosubs.core.MediaIdentifier;
+import autosubs.core.MkvIndex;
+import autosubs.core.OpenSubtitlesComSource;
+import autosubs.core.ReleaseInfo;
+import autosubs.core.ReleaseNameParser;
+import autosubs.core.StremioOpenSubtitlesSource;
+import autosubs.core.SubtitleCandidate;
+import autosubs.core.SubtitleRanker;
+import autosubs.core.SubtitleSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -144,6 +159,11 @@ public final class AutoSubs implements Player.Listener {
     public AutoSubs(Activity activity) {
         this.activity = activity;
         this.prefs = new AutoSubsPrefs(activity);
+        Net.init();
+        CoreLog.setLogger((level, message) -> {
+            if (level == 'W') Log.w(TAG, message);
+            else Log.i(TAG, message);
+        });
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -156,13 +176,6 @@ public final class AutoSubs implements Player.Listener {
         this.playerView = playerView;
         attachedAt = SystemClock.elapsedRealtime();
         player.addListener(this);
-        // Test switch for A/B start-up measurements: adb ... --ez autosubs_disable true
-        if (activity.getIntent() != null && activity.getIntent().getBooleanExtra("autosubs_disable", false)) {
-            Log.i(TAG, "Disabled by intent extra");
-            mediaUri = uri;
-            status = Status.DISABLED;
-            return;
-        }
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
@@ -267,7 +280,6 @@ public final class AutoSubs implements Player.Listener {
      */
     public boolean replacesSidecarSearch(Uri uri) {
         if (uri == null || !prefs.isEnabled()) return false;
-        if (activity.getIntent() != null && activity.getIntent().getBooleanExtra("autosubs_disable", false)) return false;
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         boolean skip = scheme.equals("http") || scheme.equals("https");
         if (skip) Log.i(TAG, "Skipping sidecar subtitle probes for stream");
@@ -310,7 +322,8 @@ public final class AutoSubs implements Player.Listener {
         list.add(new StremioOpenSubtitlesSource());
         String key = prefs.openSubtitlesApiKey();
         if (!key.isEmpty()) {
-            list.add(new OpenSubtitlesComSource(key, prefs.openSubtitlesUsername(), prefs.openSubtitlesPassword()));
+            list.add(new OpenSubtitlesComSource(key, prefs.openSubtitlesUsername(), prefs.openSubtitlesPassword(),
+                    "JustPlayerSubs v" + BuildConfig.VERSION_NAME));
         }
         return list;
     }

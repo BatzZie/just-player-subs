@@ -24,9 +24,16 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
 
 ## Code
 
-All new code is in `app/src/main/java/com/brouken/player/subs/`. Changes to upstream files are kept to a few
-lines (`PlayerActivity`, `SettingsActivity`, `app/build.gradle`, app name strings) so upstream updates merge
-easily:
+- `subs-core/` (Kotlin, no Android dependencies, package `autosubs.core`): release name parsing, IMDb lookup,
+  subtitle sources and ranking, auto sync, MKV index reader, frame rate correction, HTTP (OkHttp). Meant to be
+  reused by a desktop version or a client app. Unit tests: `./gradlew :subs-core:test` (tests with real subtitles
+  use local test data from `~/Desktop/justplayer/testdata`, or `-Dautosubs.testdata=<dir>`, and are skipped
+  without it).
+- `app/src/main/java/com/brouken/player/subs/`: the Android side (player integration and drawing, settings,
+  Media3 subtitle parsing, OkHttp data source for playback).
+
+Changes to upstream files are kept to a few lines (`PlayerActivity`, `SettingsActivity`, `app/build.gradle`,
+`settings.gradle`, app name strings) so upstream updates merge easily:
 
 ```
 git fetch upstream && git merge upstream/master

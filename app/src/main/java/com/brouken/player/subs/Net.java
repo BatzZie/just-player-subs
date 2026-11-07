@@ -6,45 +6,26 @@ import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
 
-import java.util.concurrent.TimeUnit;
-
-import okhttp3.OkHttpClient;
+import autosubs.core.Http;
 
 /**
- * One shared OkHttp client for playback and subtitle requests.
- * <p>
- * OkHttp tries IPv6 and IPv4 in parallel ("Happy Eyeballs"). The platform HttpURLConnection that Media3 uses by
- * default tries addresses one by one and waits for each to time out: on networks where IPv6 to some hosts is broken
- * (seen with Torrentio behind Cloudflare) that added ~15 s to every start of a stream.
+ * Playback over the shared OkHttp client of the core (Happy Eyeballs: IPv6 and IPv4 in parallel; see
+ * {@link Http}). The platform HttpURLConnection waited ~15 s per stream start on networks with broken IPv6.
  */
 public final class Net {
 
-    private static OkHttpClient client;
-
     private Net() {}
 
-    public static synchronized OkHttpClient client() {
-        if (client == null) {
-            client = new OkHttpClient.Builder()
-                    .fastFallback(true)
-                    .connectTimeout(8, TimeUnit.SECONDS)
-                    .readTimeout(8, TimeUnit.SECONDS)
-                    .followRedirects(true)
-                    .followSslRedirects(true)
-                    .build();
-        }
-        return client;
-    }
-
     /** Same user agent as the platform HTTP stack, which streams were already tested with. */
-    static String userAgent() {
+    static void init() {
         String ua = System.getProperty("http.agent");
-        return ua == null || ua.isEmpty() ? "JustPlayerSubs" : ua;
+        if (ua != null && !ua.isEmpty()) Http.setUserAgent(ua);
     }
 
     /** Data source for the player: OkHttp for http(s), the default sources for files and content URIs. */
     public static DataSource.Factory dataSourceFactory(Context context) {
-        OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(client()).setUserAgent(userAgent());
+        init();
+        OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(Http.getClient()).setUserAgent(Http.getUserAgent());
         return new DefaultDataSource.Factory(context, http);
     }
 }

@@ -38,7 +38,7 @@ public final class SubtitleTrack {
     }
 
     public static SubtitleTrack parse(byte[] data) {
-        data = toUtf8(data);
+        data = autosubs.core.TextEncoding.toUtf8(data);
         SubtitleParser parser;
         String head = new String(data, 0, Math.min(data.length, 2048), StandardCharsets.UTF_8);
         if (head.startsWith("﻿")) head = head.substring(1);
@@ -62,23 +62,6 @@ public final class SubtitleTrack {
             entries.add(new Entry(c.startTimeUs, end, c.cues));
         }
         return new SubtitleTrack(entries);
-    }
-
-    /** Files without valid UTF-8 are almost always Windows-1252 (Western European). */
-    static byte[] toUtf8(byte[] data) {
-        if (data.length >= 2 && ((data[0] == (byte) 0xFF && data[1] == (byte) 0xFE)
-                || (data[0] == (byte) 0xFE && data[1] == (byte) 0xFF))) {
-            return data; // UTF-16 with BOM, the parsers handle it
-        }
-        try {
-            StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                    .decode(java.nio.ByteBuffer.wrap(data));
-            return data;
-        } catch (java.nio.charset.CharacterCodingException e) {
-            return new String(data, java.nio.charset.Charset.forName("windows-1252")).getBytes(StandardCharsets.UTF_8);
-        }
     }
 
     /** Start times of all cues in ms (subtitle time, before scale and offset). */
@@ -128,39 +111,8 @@ public final class SubtitleTrack {
         return lo;
     }
 
-    /**
-     * Speed factor for subtitles made for a different frame rate (e.g. 25 fps PAL vs 23.976 fps).
-     *
-     * @param subFps   frame rate the subtitle was made for, or <= 0 if unknown
-     * @param videoFps frame rate of the video, or <= 0 if unknown
-     */
+    /** Speed factor for subtitles made for a different frame rate, see {@link autosubs.core.FrameRate}. */
     public double detectScale(double subFps, double videoFps, long videoDurationMs) {
-        long last = lastEndMs();
-        boolean durationKnown = videoDurationMs > 0 && last > 0;
-
-        if (subFps > 0 && videoFps > 0) {
-            double f = subFps / videoFps;
-            if (isKnownRatio(f)) {
-                // Only trust the metadata if the subtitle still fits the video after scaling
-                if (!durationKnown || last * f <= videoDurationMs + 2000) return f;
-            }
-        }
-        // Subtitle runs well past the end of the video: probably made for a slower frame rate
-        if (durationKnown && videoDurationMs > 10 * 60_000 && last > videoDurationMs + 20_000) {
-            double[] candidates = {23.976 / 25.0, 24.0 / 25.0};
-            for (double f : candidates) {
-                if (last * f <= videoDurationMs + 2000) return f;
-            }
-        }
-        return 1.0;
-    }
-
-    private static boolean isKnownRatio(double f) {
-        // Only the ~4% PAL speed-up; 24 vs 23.976 fps metadata is too unreliable to act on
-        double[] known = {25.0 / 23.976, 25.0 / 24.0};
-        for (double k : known) {
-            if (Math.abs(f - k) < 0.0004 || Math.abs(f - 1.0 / k) < 0.0004) return true;
-        }
-        return false;
+        return autosubs.core.FrameRate.detectScale(lastEndMs(), subFps, videoFps, videoDurationMs);
     }
 }

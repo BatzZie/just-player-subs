@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="autosubs.core.MkvIndexTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-07T14:04:37.868Z" hostname="fedora" time="0.08">
+  <properties/>
+  <testcase name="indexAtTheVeryEndOfTheFile()" classname="autosubs.core.MkvIndexTest" time="0.02"/>
+  <testcase name="indexFeedsAutoSync()" classname="autosubs.core.MkvIndexTest" time="0.046"/>
+  <testcase name="notMatroska()" classname="autosubs.core.MkvIndexTest" time="0.001"/>
+  <testcase name="readsSubtitleStartTimes()" classname="autosubs.core.MkvIndexTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
