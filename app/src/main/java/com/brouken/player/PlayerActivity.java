@@ -787,6 +787,7 @@ public class PlayerActivity extends Activity {
                     }
                 }
             }
+            autoSubs.completeResult(intent, playbackFinished);
             setResult(Activity.RESULT_OK, intent);
         }
 

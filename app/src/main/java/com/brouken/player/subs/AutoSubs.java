@@ -188,6 +188,7 @@ public final class AutoSubs implements Player.Listener {
     }
 
     public void detach() {
+        rememberPosition();
         exitTimingMode();
         stopTicking();
         main.removeCallbacks(syncCheck);
@@ -226,6 +227,8 @@ public final class AutoSubs implements Player.Listener {
         syncProvisional = false;
         indexRequested = false;
         indexRefs = null;
+        lastPositionMs = -1;
+        lastDurationMs = -1;
     }
 
     /** Ask the player for an embedded text track up front (preferred languages, then English as sync reference). */
@@ -269,6 +272,35 @@ public final class AutoSubs implements Player.Listener {
         boolean skip = scheme.equals("http") || scheme.equals("https");
         if (skip) Log.i(TAG, "Skipping sidecar subtitle probes for stream");
         return skip;
+    }
+
+    // ---------------------------------------------------------------- result for the calling app (Stremio)
+
+    private long lastPositionMs = -1;
+    private long lastDurationMs = -1;
+
+    private void rememberPosition() {
+        if (player == null || mediaUri == null) return;
+        long d = player.getDuration();
+        if (d != C.TIME_UNSET && d > 0) lastDurationMs = d;
+        if (player.isCurrentMediaItemSeekable()) lastPositionMs = player.getCurrentPosition();
+    }
+
+    /**
+     * Completes the result Just Player sends back (MX Player format). Upstream only adds position/duration while the
+     * player still exists; after onStop it is already released, so use the last known values. Also adds the VLC
+     * keys, so callers that expect those get the position too.
+     */
+    public void completeResult(android.content.Intent intent, boolean finished) {
+        rememberPosition();
+        if (!finished) {
+            if (!intent.hasExtra("position") && lastPositionMs >= 0) intent.putExtra("position", (int) lastPositionMs);
+            if (!intent.hasExtra("duration") && lastDurationMs > 0) intent.putExtra("duration", (int) lastDurationMs);
+        }
+        if (intent.hasExtra("position")) intent.putExtra("extra_position", (long) intent.getIntExtra("position", 0));
+        if (intent.hasExtra("duration")) intent.putExtra("extra_duration", (long) intent.getIntExtra("duration", 0));
+        Log.i(TAG, "Result: end_by=" + intent.getStringExtra("end_by") + " position=" + intent.getIntExtra("position", -1)
+                + " duration=" + intent.getIntExtra("duration", -1));
     }
 
     // ---------------------------------------------------------------- search
