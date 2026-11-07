@@ -378,10 +378,12 @@ public final class AutoSubs implements Player.Listener {
      * the front, so the write is repeated a few times.
      */
     /**
-     * Test: let Stremio store the progress itself (result without duration) instead of writing it to the account.
-     * The account write (reportToStremio) stays available as a fallback.
+     * Tested and rejected (7 Nov 2026): Stremio's TV app can't store the progress of an external player itself.
+     * With position + duration its inverted check (duration / position > 0.7) marks the video watched and Unload
+     * moves on to the next episode; without a duration, Seek stores duration 0 and Unload's 90% rule resets the
+     * position to 0. So no result is sent and the progress is written to the account instead.
      */
-    private static final boolean STREMIO_RESULT_WITHOUT_DURATION = true;
+    private static final boolean STREMIO_RESULT_WITHOUT_DURATION = false;
 
     /** Each stop (and each new start) gets a new token; older background writes stop when they see a newer one. */
     private static final java.util.concurrent.atomic.AtomicLong stremioSyncToken = new java.util.concurrent.atomic.AtomicLong();
@@ -521,14 +523,22 @@ public final class AutoSubs implements Player.Listener {
                     final MediaId fid = id;
                     final String fhash = hash;
                     final long fsize = size;
-                    futures.add(executor.submit(() -> s.search(fid, fhash, fsize, name, languages)));
+                    futures.add(executor.submit(() -> {
+                        try {
+                            return s.search(fid, fhash, fsize, name, languages);
+                        } catch (java.io.IOException first) {
+                            // e.g. the addon timing out once: try again
+                            Log.w(TAG, s.name() + " failed (" + first + "), retrying");
+                            return s.search(fid, fhash, fsize, name, languages);
+                        }
+                    }));
                 }
                 List<SubtitleCandidate> found = new ArrayList<>();
                 Set<String> legacyIds = new HashSet<>();
                 boolean anyOk = false;
                 for (int i = 0; i < futures.size(); i++) {
                     try {
-                        List<SubtitleCandidate> list = futures.get(i).get(15, TimeUnit.SECONDS);
+                        List<SubtitleCandidate> list = futures.get(i).get(30, TimeUnit.SECONDS);
                         anyOk = true;
                         int added = 0;
                         for (SubtitleCandidate c : list) {
