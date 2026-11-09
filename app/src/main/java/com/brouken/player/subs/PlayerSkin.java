@@ -60,6 +60,14 @@ public final class PlayerSkin {
     static final String KEY_ENABLED = "skin_enabled";
     static final String KEY_ACCENT = "skin_accent";
     static final String KEY_TIME = "skin_time";
+    static final String KEY_TITLE = "skin_title";
+    static final String TITLE_CODE_EPISODE = "code_episode";
+    static final String TITLE_EPISODE = "episode";
+    static final String TITLE_EPISODE_CODE = "episode_code";
+    static final String TITLE_CODE = "code";
+    static final String TITLE_ONLY = "title";
+    static final String TITLE_FILENAME = "filename";
+    static final String TITLE_NONE = "none";
     static final String DEFAULT_ACCENT = "#7B5CFA";
     static final String TIME_TOTAL = "total";
     static final String TIME_REMAINING = "remaining";
@@ -554,18 +562,64 @@ public final class PlayerSkin {
         }
     }
 
-    /** Title (e.g. "MobLand · S2 E1") and an info line from the selected tracks ("4K · HDR · Atmos"). */
-    public void setTitle(String title, Tracks tracks) {
-        if (!enabled || titleView == null || title == null) return;
-        String info = info(tracks);
+    private String show, episodeTitle;
+    private int year = -1, season = -1, episode = -1;
+    private Tracks tracks;
+    private CharSequence lastSet, fileTitle;
+
+    /** Parts of the title: from the file name first, later from Cinemeta. season/episode -1 for a movie. */
+    public void setTitleParts(String show, int year, int season, int episode, String episodeTitle) {
+        if (show == null) return;
+        this.show = show;
+        this.year = year;
+        this.season = season;
+        this.episode = episode;
+        this.episodeTitle = episodeTitle;
+        renderTitle();
+    }
+
+    public void setTracks(Tracks tracks) {
+        this.tracks = tracks;
+        renderTitle();
+    }
+
+    /** The title in the chosen format, e.g. "Young Sheldon · S06E22 · A Tornado..." or "The Batman (2022)". */
+    static String formatTitle(String format, String show, int year, int season, int episode, String episodeTitle) {
+        if (show == null) return null;
+        if (TITLE_ONLY.equals(format)) return show;
+        if (season < 0 || episode < 0) return year > 0 ? show + " (" + year + ")" : show;
+        String code = String.format(Locale.ROOT, "S%02dE%02d", season, episode);
+        boolean hasName = episodeTitle != null && !episodeTitle.isEmpty();
+        if (TITLE_CODE.equals(format) || !hasName) return show + " · " + code;
+        if (TITLE_EPISODE.equals(format)) return show + " · " + episodeTitle;
+        if (TITLE_EPISODE_CODE.equals(format)) return show + " · " + episodeTitle + " · " + code;
+        return show + " · " + code + " · " + episodeTitle;
+    }
+
+    private void renderTitle() {
+        if (!enabled || titleView == null) return;
+        CharSequence current = titleView.getText();
+        if (lastSet == null || !lastSet.toString().equals(String.valueOf(current))) fileTitle = current;
+        String format = prefs.getString(KEY_TITLE, TITLE_CODE_EPISODE);
+        String title;
+        if (TITLE_NONE.equals(format)) title = "";
+        else if (TITLE_FILENAME.equals(format)) title = fileTitle == null ? "" : fileTitle.toString();
+        else title = formatTitle(format, show, year, season, episode, episodeTitle);
+        if (title == null) {
+            if (tracks == null) return;
+            title = fileTitle == null ? "" : fileTitle.toString();
+        }
+        String info = TITLE_NONE.equals(format) || tracks == null ? "" : info(tracks);
         SpannableStringBuilder sb = new SpannableStringBuilder(title);
         if (!info.isEmpty()) {
+            if (sb.length() == 0) sb.append('\u200B');
             int start = sb.length();
             sb.append('\n').append(info);
             sb.setSpan(new AbsoluteSizeSpan(12, true), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             sb.setSpan(new ForegroundColorSpan(0xB3FFFFFF), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         titleView.setText(sb);
+        lastSet = titleView.getText();
     }
 
     static String info(Tracks tracks) {

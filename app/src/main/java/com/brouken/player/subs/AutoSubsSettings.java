@@ -274,6 +274,17 @@ public final class AutoSubsSettings {
         time.setDefaultValue(PlayerSkin.TIME_TOTAL);
         time.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
         add(category, time);
+
+        ListPreference title = new ListPreference(ctx);
+        title.setKey(PlayerSkin.KEY_TITLE);
+        title.setTitle(R.string.skin_title);
+        title.setDialogTitle(R.string.skin_title);
+        title.setEntries(ctx.getResources().getStringArray(R.array.skin_title_names));
+        title.setEntryValues(new String[]{PlayerSkin.TITLE_CODE_EPISODE, PlayerSkin.TITLE_EPISODE, PlayerSkin.TITLE_EPISODE_CODE,
+                PlayerSkin.TITLE_CODE, PlayerSkin.TITLE_ONLY, PlayerSkin.TITLE_FILENAME, PlayerSkin.TITLE_NONE});
+        title.setDefaultValue(PlayerSkin.TITLE_CODE_EPISODE);
+        title.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+        add(category, title);
     }
 
     private static void add(PreferenceCategory category, Preference p) {

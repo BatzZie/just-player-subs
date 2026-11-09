@@ -55,6 +55,16 @@
     <string-array name="skin_time_names">
         <item>Totale duur</item><item>Resterende tijd</item><item>Eindtijd (klok)</item>
     </string-array>
+    <string name="skin_title">Titel</string>
+    <string-array name="skin_title_names">
+        <item>Serie · S06E22 · Aflevering</item>
+        <item>Serie · Aflevering</item>
+        <item>Serie · Aflevering · S06E22</item>
+        <item>Serie · S06E22</item>
+        <item>Alleen titel</item>
+        <item>Bestandsnaam</item>
+        <item>Geen titel</item>
+    </string-array>
     <string name="stremio_category">Stremio</string>
     <string name="stremio_account">Stremio-account</string>
     <string name="stremio_account_summary">Log in om je kijkvoortgang naar Stremio te sturen (Verder kijken)</string>

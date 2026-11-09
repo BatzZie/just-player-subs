@@ -160,11 +160,28 @@ public final class AutoSubs implements Player.Listener {
         this.skin = skin;
     }
 
-    /** "MobLand · S2 E1" or "The Batman (2022)", from the file name; null if unknown. */
-    private String niceTitle() {
-        if (videoInfo == null || videoInfo.title == null) return null;
-        if (videoInfo.isEpisode()) return videoInfo.title + " · S" + videoInfo.season + " E" + videoInfo.episode;
-        return videoInfo.title + (videoInfo.year > 0 ? " (" + videoInfo.year + ")" : "");
+    /** Title parts from the file name, until Cinemeta answers. */
+    private boolean titleFromMeta;
+
+    private void titleFromFileName() {
+        if (titleFromMeta || skin == null || videoInfo == null || videoInfo.title == null) return;
+        boolean ep = videoInfo.isEpisode();
+        skin.setTitleParts(videoInfo.title, videoInfo.year, ep ? videoInfo.season : -1, ep ? videoInfo.episode : -1, null);
+    }
+
+    /** Correct name, year and episode title from Cinemeta (the file name is often abbreviated). */
+    private void fetchTitle(MediaId id, int gen) {
+        if (id == null || skin == null) return;
+        executor.execute(() -> {
+            autosubs.core.StremioApi.Companion.Meta meta = autosubs.core.StremioApi.fullMeta(id.type(), id.imdbId);
+            if (meta == null || meta.name == null) return;
+            String episodeTitle = id.isSeries() ? meta.episodeTitle(id.videoId()) : null;
+            Log.i(TAG, "Title from Cinemeta: " + meta.name + " " + meta.year + (episodeTitle != null ? " / " + episodeTitle : ""));
+            post(gen, () -> {
+                titleFromMeta = true;
+                if (skin != null) skin.setTitleParts(meta.name, meta.year, id.season, id.episode, episodeTitle);
+            });
+        });
     }
 
     private String sinceAttach() {
@@ -281,6 +298,7 @@ public final class AutoSubs implements Player.Listener {
         lastDurationMs = -1;
         startPositionMs = -1;
         mediaId = null;
+        titleFromMeta = false;
         resumeChecked = false;
     }
 
@@ -584,6 +602,7 @@ public final class AutoSubs implements Player.Listener {
                     mediaId = foundId;
                     checkResume();
                 });
+                fetchTitle(foundId, gen);
                 if (id == null) {
                     post(gen, () -> onSearchDone(Collections.emptyList()));
                     return;
@@ -1151,7 +1170,10 @@ public final class AutoSubs implements Player.Listener {
     @Override
     public void onTracksChanged(Tracks tracks) {
         Log.i(TAG, "Tracks known (" + tracks.getGroups().size() + " groups), text=" + selectedEmbeddedText() + " " + sinceAttach());
-        if (skin != null) skin.setTitle(niceTitle(), tracks);
+        if (skin != null) {
+            titleFromFileName();
+            skin.setTracks(tracks);
+        }
         updateEmbeddedChoice();
     }
 

@@ -55,6 +55,16 @@
     <string-array name="skin_time_names">
         <item>Total duration</item><item>Remaining time</item><item>End time (clock)</item>
     </string-array>
+    <string name="skin_title">Title</string>
+    <string-array name="skin_title_names">
+        <item>Show · S06E22 · Episode</item>
+        <item>Show · Episode</item>
+        <item>Show · Episode · S06E22</item>
+        <item>Show · S06E22</item>
+        <item>Title only</item>
+        <item>File name</item>
+        <item>No title</item>
+    </string-array>
     <string name="stremio_category">Stremio</string>
     <string name="stremio_account">Stremio account</string>
     <string name="stremio_account_summary">Log in to send your watch progress to Stremio (Continue watching)</string>

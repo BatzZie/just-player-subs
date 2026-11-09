@@ -191,7 +191,13 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
             }
         }
 
-        class Meta(val name: String?, val poster: String?, val videos: List<WatchedBitField.Companion.Video>)
+        class Meta(
+            @JvmField val name: String?, @JvmField val poster: String?, @JvmField val videos: List<WatchedBitField.Companion.Video>,
+            @JvmField val year: Int = -1,
+        ) {
+            /** Episode title of a video ("tt123:6:22"), or null. */
+            fun episodeTitle(videoId: String): String? = videos.firstOrNull { it.id == videoId }?.title?.ifEmpty { null }
+        }
 
         /** Name, poster and episode list from Cinemeta (the source Stremio uses for the watched order). */
         @JvmStatic
@@ -200,7 +206,15 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
             if (m == null) null else Meta(
                 m.str("name").ifEmpty { null },
                 m.str("poster").ifEmpty { null },
-                m["videos"].arr()?.mapNotNull { el ->
+                videos = parseVideos(m),
+                year = Regex("(\\d{4})").find(m.str("releaseInfo", m.str("year")))?.groupValues?.get(1)?.toInt() ?: -1,
+            )
+        } catch (e: Exception) {
+            null
+        }
+
+        private fun parseVideos(m: JsonObject): List<WatchedBitField.Companion.Video> =
+            m["videos"].arr()?.mapNotNull { el ->
                     val v = el.obj() ?: return@mapNotNull null
                     val released = v.str("released").ifEmpty { null }?.let {
                         try { java.time.Instant.parse(it).toEpochMilli() } catch (e: Exception) { null }
@@ -208,10 +222,7 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
                     WatchedBitField.Companion.Video(v.str("id"),
                         if (v.has("season")) v.long("season", 0) else null,
                         if (v.has("episode")) v.long("episode", 0) else if (v.has("number")) v.long("number", 0) else null,
-                        released)
-                } ?: emptyList())
-        } catch (e: Exception) {
-            null
-        }
+                        released, v.str("name", v.str("title")).ifEmpty { null })
+                } ?: emptyList()
     }
 }

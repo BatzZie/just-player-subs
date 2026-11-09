@@ -61,7 +61,10 @@ class WatchedBitField private constructor(private val videoIds: List<String>, pr
             videos.sortedWith(compareBy<Video>({ it.season ?: Long.MIN_VALUE }, { it.episode ?: Long.MIN_VALUE },
                 { it.releasedMs ?: Long.MIN_VALUE })).map { it.id }
 
-        class Video(@JvmField val id: String, @JvmField val season: Long?, @JvmField val episode: Long?, @JvmField val releasedMs: Long?)
+        class Video(
+            @JvmField val id: String, @JvmField val season: Long?, @JvmField val episode: Long?, @JvmField val releasedMs: Long?,
+            @JvmField val title: String? = null,
+        )
 
         internal fun pack(bytes: ByteArray): String {
             val d = Deflater(6)
