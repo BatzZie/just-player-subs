@@ -423,8 +423,10 @@ public final class AutoSubs implements Player.Listener {
         final boolean done = finished || pos >= dur * FINISHED;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
         if (done) return false; // handled by the completion result (Stremio is leading)
-        if (watched < 60_000) {
-            Log.i(TAG, "Stremio: watched only " + (watched / 1000) + " s, position not written");
+        // Always write the real video and position, like Stremio's own player does: if Stremio doesn't know the
+        // duration yet it treats any stop as finished and jumps to the next episode. Only ignore accidental starts.
+        if (pos < 5_000) {
+            Log.i(TAG, "Stremio: stopped at " + (pos / 1000) + " s, position not written");
             return true;
         }
         final long token = stremioSyncToken.incrementAndGet();
