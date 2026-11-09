@@ -445,12 +445,16 @@ public final class AutoSubs implements Player.Listener {
                     }
                     if (at > 0) {
                         autosubs.core.StremioApi.Progress p = api.readProgress(authKey, id);
-                        if (p == null || !id.videoId().equals(p.videoId)) {
-                            Log.i(TAG, "Stremio library moved on to " + (p == null ? "-" : p.videoId) + ", stop repairing");
+                        // Stremio's own unload may jump to the next episode at offset 0/1 ms (it treats a stop as
+                        // finished when it doesn't know the duration): repair that. Real progress on another
+                        // video (offset > 1 s) means it really moved on.
+                        if (p != null && !id.videoId().equals(p.videoId) && p.offsetMs > 1000) {
+                            Log.i(TAG, "Stremio library moved on to " + p.videoId + ", stop repairing");
                             return;
                         }
-                        if (Math.abs(p.offsetMs - pos) < 1000) continue;
-                        Log.i(TAG, "Stremio wrote " + (p.offsetMs / 1000) + "s, repairing to " + (pos / 1000) + "s");
+                        if (p != null && id.videoId().equals(p.videoId) && Math.abs(p.offsetMs - pos) < 1000) continue;
+                        Log.i(TAG, "Stremio wrote " + (p == null ? "nothing" : p.videoId + " at " + (p.offsetMs / 1000) + "s")
+                                + ", repairing to " + (pos / 1000) + "s");
                     }
                     boolean isNew = api.writePosition(authKey, id, pos, dur, at == 0 ? watched : 0);
                     Log.i(TAG, "Stremio position written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
