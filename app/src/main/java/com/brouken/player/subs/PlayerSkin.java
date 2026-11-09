@@ -78,6 +78,8 @@ public final class PlayerSkin {
             {"two_lines", "S|C E"},
             {"two_lines_ep_code", "S|E C"},
             {"two_lines_ep", "S|E"},
+            {"two_lines_ep_first", "E|S C"},
+            {"two_lines_ep_first_show", "E|S"},
             {"title", "S"},
     };
     static final String DEFAULT_ACCENT = "#7B5CFA";
