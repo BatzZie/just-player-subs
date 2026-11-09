@@ -62,12 +62,24 @@ public final class PlayerSkin {
     static final String KEY_TIME = "skin_time";
     static final String KEY_TITLE = "skin_title";
     static final String TITLE_CODE_EPISODE = "code_episode";
-    static final String TITLE_EPISODE = "episode";
-    static final String TITLE_EPISODE_CODE = "episode_code";
-    static final String TITLE_CODE = "code";
-    static final String TITLE_ONLY = "title";
     static final String TITLE_FILENAME = "filename";
     static final String TITLE_NONE = "none";
+    /** Title formats: S = show, C = S06E22, E = episode title, | = second line. Order as in the settings list. */
+    static final String[][] TITLE_FORMATS = {
+            {TITLE_CODE_EPISODE, "S C E"},
+            {"episode", "S E"},
+            {"episode_code", "S E C"},
+            {"code", "S C"},
+            {"code_show_episode", "C S E"},
+            {"code_show", "C S"},
+            {"code_ep", "C E"},
+            {"ep_code", "E C"},
+            {"episode_only", "E"},
+            {"two_lines", "S|C E"},
+            {"two_lines_ep_code", "S|E C"},
+            {"two_lines_ep", "S|E"},
+            {"title", "S"},
+    };
     static final String DEFAULT_ACCENT = "#7B5CFA";
     static final String TIME_TOTAL = "total";
     static final String TIME_REMAINING = "remaining";
@@ -203,7 +215,7 @@ public final class PlayerSkin {
         // Title: no bar behind it, small, with a second info line
         if (titleView != null) {
             titleView.setBackground(new ColorDrawable(Color.TRANSPARENT));
-            titleView.setMaxLines(2);
+            titleView.setMaxLines(3);
             titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             titleView.setShadowLayer(dp(3), 0, dp(1), 0xAA000000);
             titleView.setPadding(dp(28), dp(18), dp(28), dp(8));
@@ -586,14 +598,31 @@ public final class PlayerSkin {
     /** The title in the chosen format, e.g. "Young Sheldon · S06E22 · A Tornado..." or "The Batman (2022)". */
     static String formatTitle(String format, String show, int year, int season, int episode, String episodeTitle) {
         if (show == null) return null;
-        if (TITLE_ONLY.equals(format)) return show;
-        if (season < 0 || episode < 0) return year > 0 ? show + " (" + year + ")" : show;
-        String code = String.format(Locale.ROOT, "S%02dE%02d", season, episode);
+        String pattern = TITLE_FORMATS[0][1];
+        for (String[] f : TITLE_FORMATS) if (f[0].equals(format)) pattern = f[1];
+        if (season < 0 || episode < 0) {
+            // Movie: the title, with the year unless "title only"
+            return year > 0 && !"S".equals(pattern) ? show + " (" + year + ")" : show;
+        }
         boolean hasName = episodeTitle != null && !episodeTitle.isEmpty();
-        if (TITLE_CODE.equals(format) || !hasName) return show + " · " + code;
-        if (TITLE_EPISODE.equals(format)) return show + " · " + episodeTitle;
-        if (TITLE_EPISODE_CODE.equals(format)) return show + " · " + episodeTitle + " · " + code;
-        return show + " · " + code + " · " + episodeTitle;
+        // Without an episode title: "show · S06E22" if the format would otherwise lose the show or be empty
+        if (!hasName && pattern.contains("E") && !pattern.contains("S")) pattern = "S C";
+        else if (!hasName && pattern.contains("E") && !pattern.contains("C")) pattern = pattern.replace("E", "C");
+        String code = String.format(Locale.ROOT, "S%02dE%02d", season, episode);
+        StringBuilder out = new StringBuilder();
+        for (String line : pattern.split("\\|")) {
+            StringBuilder l = new StringBuilder();
+            for (String part : line.split(" ")) {
+                String text = part.equals("S") ? show : part.equals("C") ? code : hasName ? episodeTitle : null;
+                if (text == null) continue;
+                if (l.length() > 0) l.append(" · ");
+                l.append(text);
+            }
+            if (l.length() == 0) continue;
+            if (out.length() > 0) out.append('\n');
+            out.append(l);
+        }
+        return out.toString();
     }
 
     private void renderTitle() {
@@ -611,6 +640,8 @@ public final class PlayerSkin {
         }
         String info = TITLE_NONE.equals(format) || tracks == null ? "" : info(tracks);
         SpannableStringBuilder sb = new SpannableStringBuilder(title);
+        int nl = title.indexOf('\n');
+        if (nl >= 0) sb.setSpan(new AbsoluteSizeSpan(14, true), nl + 1, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         if (!info.isEmpty()) {
             if (sb.length() == 0) sb.append('\u200B');
             int start = sb.length();

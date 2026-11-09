@@ -61,6 +61,14 @@
         <item>Serie · Aflevering</item>
         <item>Serie · Aflevering · S06E22</item>
         <item>Serie · S06E22</item>
+        <item>S06E22 · Serie · Aflevering</item>
+        <item>S06E22 · Serie</item>
+        <item>S06E22 · Aflevering</item>
+        <item>Aflevering · S06E22</item>
+        <item>Alleen aflevering</item>
+        <item>Twee regels: Serie / S06E22 · Aflevering</item>
+        <item>Twee regels: Serie / Aflevering · S06E22</item>
+        <item>Twee regels: Serie / Aflevering</item>
         <item>Alleen titel</item>
         <item>Bestandsnaam</item>
         <item>Geen titel</item>

@@ -280,8 +280,11 @@ public final class AutoSubsSettings {
         title.setTitle(R.string.skin_title);
         title.setDialogTitle(R.string.skin_title);
         title.setEntries(ctx.getResources().getStringArray(R.array.skin_title_names));
-        title.setEntryValues(new String[]{PlayerSkin.TITLE_CODE_EPISODE, PlayerSkin.TITLE_EPISODE, PlayerSkin.TITLE_EPISODE_CODE,
-                PlayerSkin.TITLE_CODE, PlayerSkin.TITLE_ONLY, PlayerSkin.TITLE_FILENAME, PlayerSkin.TITLE_NONE});
+        String[] values = new String[PlayerSkin.TITLE_FORMATS.length + 2];
+        for (int i = 0; i < PlayerSkin.TITLE_FORMATS.length; i++) values[i] = PlayerSkin.TITLE_FORMATS[i][0];
+        values[values.length - 2] = PlayerSkin.TITLE_FILENAME;
+        values[values.length - 1] = PlayerSkin.TITLE_NONE;
+        title.setEntryValues(values);
         title.setDefaultValue(PlayerSkin.TITLE_CODE_EPISODE);
         title.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
         add(category, title);

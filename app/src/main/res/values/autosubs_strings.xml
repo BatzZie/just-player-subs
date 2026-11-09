@@ -61,6 +61,14 @@
         <item>Show · Episode</item>
         <item>Show · Episode · S06E22</item>
         <item>Show · S06E22</item>
+        <item>S06E22 · Show · Episode</item>
+        <item>S06E22 · Show</item>
+        <item>S06E22 · Episode</item>
+        <item>Episode · S06E22</item>
+        <item>Episode only</item>
+        <item>Two lines: Show / S06E22 · Episode</item>
+        <item>Two lines: Show / Episode · S06E22</item>
+        <item>Two lines: Show / Episode</item>
         <item>Title only</item>
         <item>File name</item>
         <item>No title</item>
