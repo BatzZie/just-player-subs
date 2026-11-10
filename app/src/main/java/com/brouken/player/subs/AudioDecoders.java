@@ -19,6 +19,8 @@ import java.util.Locale;
  * FLAC then goes to the FFmpeg extension, which decodes it as well. Only when extensions are allowed.
  */
 public final class AudioDecoders {
+    private static boolean logged;
+
     private AudioDecoders() {
     }
 
@@ -33,7 +35,10 @@ public final class AudioDecoders {
                 if (name.startsWith("omx.google.") || name.startsWith("c2.android.")) continue;
                 kept.add(info);
             }
-            if (kept.size() != infos.size()) Log.i(AutoSubs.TAG, "FLAC: using the FFmpeg decoder instead of Android's");
+            if (kept.size() != infos.size() && !logged) {
+                logged = true;
+                Log.i(AutoSubs.TAG, "FLAC: using the FFmpeg decoder instead of Android's");
+            }
             return kept;
         };
     }
