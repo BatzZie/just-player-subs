@@ -1529,7 +1529,7 @@ public class PlayerActivity extends Activity {
                     }
 
                     boolean switched = false;
-                    if (mPrefs.frameRateMatching) {
+                    if (mPrefs.frameRateMatching && !com.brouken.player.subs.AutoSubs.HANDLES_FRAME_RATE) {
                         if (play) {
                             if (displayManager == null) {
                                 displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);

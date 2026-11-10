@@ -155,6 +155,10 @@ public final class AutoSubs implements Player.Listener {
 
     private long attachedAt;
     private final LaunchTransition launchTransition;
+    private final FrameRateSwitcher frameRate;
+
+    /** Our FrameRateSwitcher handles "Auto frame rate matching" (Just Player's own way is skipped). */
+    public static final boolean HANDLES_FRAME_RATE = true;
     private PlayerSkin skin;
 
     public void setSkin(PlayerSkin skin) {
@@ -235,6 +239,7 @@ public final class AutoSubs implements Player.Listener {
         this.activity = activity;
         this.prefs = new AutoSubsPrefs(activity);
         this.launchTransition = LaunchTransition.begin(activity);
+        this.frameRate = new FrameRateSwitcher(activity);
         Net.init();
         CoreLog.setLogger((level, message) -> {
             if (level == 'W') Log.w(TAG, message);
@@ -256,6 +261,10 @@ public final class AutoSubs implements Player.Listener {
         player.addListener(launchTransition);
         if (skin != null) skin.onPlayerStarted(player);
         logDecoders(player);
+        if (uri == null || !uri.equals(mediaUri)) {
+            frameRate.attach(player, androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
+                    .getBoolean(FrameRateSwitcher.KEY, false));
+        }
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
@@ -289,6 +298,7 @@ public final class AutoSubs implements Player.Listener {
     }
 
     public void detach() {
+        frameRate.detach();
         if (skin != null) skin.onPlayerStopped();
         rememberPosition();
         exitTimingMode();
