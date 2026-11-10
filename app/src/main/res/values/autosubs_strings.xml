@@ -103,4 +103,14 @@
     <string name="skin_aspect_crop">Crop</string>
     <string name="skin_aspect_zoom">Zoom…</string>
     <string name="skin_menu_track">Track %d</string>
+    <string name="audio_category">Audio</string>
+    <string name="audio_original">Original language for</string>
+    <string name="audio_original_summary">Anime in Japanese, Korean series in Korean, … (from Cinemeta). A track you pick in the audio menu is remembered per series or movie.</string>
+    <string name="skin_audio_remembered">%s remembered for this title</string>
+    <string-array name="audio_original_names">
+        <item>Never</item>
+        <item>Anime</item>
+        <item>Anime + Asian series and movies</item>
+        <item>Everything</item>
+    </string-array>
 </resources>

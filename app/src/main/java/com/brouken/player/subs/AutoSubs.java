@@ -165,6 +165,36 @@ public final class AutoSubs implements Player.Listener {
     /** Title parts from the file name, until Cinemeta answers. */
     private boolean titleFromMeta;
 
+    /**
+     * Puts a language in front of the preferred audio languages (the user's own setting stays as fallback).
+     * Usually done before the tracks are known, so there is no audible switch. A track the user picked for this
+     * file (Just Player remembers it per file) stays.
+     */
+    private void preferAudioLanguage(String language, String why) {
+        if (player == null || language == null) return;
+        TrackSelectionParameters params = player.getTrackSelectionParameters();
+        for (TrackSelectionOverride o : params.overrides.values()) {
+            if (o.getType() == C.TRACK_TYPE_AUDIO) {
+                Log.i(TAG, "Audio " + language + " (" + why + ") not applied: a track was chosen for this file");
+                return;
+            }
+        }
+        List<String> langs = new ArrayList<>();
+        langs.add(language);
+        for (String l : params.preferredAudioLanguages) if (!langs.contains(l)) langs.add(l);
+        if (langs.equals(params.preferredAudioLanguages)) return;
+        Log.i(TAG, "Audio language " + language + " first (" + why + "): " + langs);
+        player.setTrackSelectionParameters(params.buildUpon().setPreferredAudioLanguages(langs.toArray(new String[0])).build());
+    }
+
+    /** Called from the audio menu: remember the language for this series or movie. */
+    void onAudioChosen(Format f) {
+        if (mediaId == null || f == null || f.language == null || "und".equals(f.language)) return;
+        prefs.setAudioChoice(mediaId.imdbId, f.language);
+        Log.i(TAG, "Audio " + f.language + " remembered for " + mediaId.imdbId);
+        toast(activity.getString(R.string.skin_audio_remembered, Languages.displayName(Languages.canonical(f.language))));
+    }
+
     private void titleFromFileName() {
         if (titleFromMeta || skin == null || videoInfo == null || videoInfo.title == null) return;
         boolean ep = videoInfo.isEpisode();
@@ -173,10 +203,19 @@ public final class AutoSubs implements Player.Listener {
 
     /** Correct name, year and episode title from Cinemeta (the file name is often abbreviated). */
     private void fetchTitle(MediaId id, int gen) {
-        if (id == null || skin == null) return;
+        if (id == null) return;
+        // A choice the user made for this series/movie wins over the original-language rule
+        String chosen = prefs.audioChoice(id.imdbId);
+        if (chosen != null) post(gen, () -> preferAudioLanguage(chosen, "your choice for this title"));
         executor.execute(() -> {
             autosubs.core.StremioApi.Companion.Meta meta = autosubs.core.StremioApi.fullMeta(id.type(), id.imdbId);
             if (meta == null || meta.name == null) return;
+            if (chosen == null) {
+                String original = autosubs.core.OriginalLanguage.languageFor(prefs.audioOriginal(), meta.genres, meta.countries);
+                Log.i(TAG, "Genres " + meta.genres + ", countries " + meta.countries + " -> original audio " + original);
+                if (original != null) post(gen, () -> preferAudioLanguage(original, "original language"));
+            }
+            if (skin == null) return;
             String episodeTitle = id.isSeries() ? meta.episodeTitle(id.videoId()) : null;
             Log.i(TAG, "Title from Cinemeta: " + meta.name + " " + meta.year + (episodeTitle != null ? " / " + episodeTitle : ""));
             post(gen, () -> {

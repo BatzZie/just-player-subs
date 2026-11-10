@@ -210,6 +210,8 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         class Meta(
             @JvmField val name: String?, @JvmField val poster: String?, @JvmField val videos: List<WatchedBitField.Companion.Video>,
             @JvmField val year: Int = -1,
+            @JvmField val genres: List<String> = emptyList(),
+            @JvmField val countries: List<String> = emptyList(),
         ) {
             /** Episode title of a video ("tt123:6:22"), or null. */
             fun episodeTitle(videoId: String): String? = videos.firstOrNull { it.id == videoId }?.title?.ifEmpty { null }
@@ -243,6 +245,8 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
                 m.str("poster").ifEmpty { null },
                 videos = parseVideos(m),
                 year = Regex("(\\d{4})").find(m.str("releaseInfo", m.str("year")))?.groupValues?.get(1)?.toInt() ?: -1,
+                genres = (m["genres"].arr() ?: m["genre"].arr())?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: emptyList(),
+                countries = m.str("country").split(",").map { it.trim() }.filter { it.isNotEmpty() },
             )
         } catch (e: Exception) {
             null

@@ -329,6 +329,7 @@ public final class PlayerSkin {
                                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                                 .setOverrideForType(new TrackSelectionOverride(g.getMediaTrackGroup(), track))
                                 .build());
+                        if (autoSubs != null) autoSubs.onAudioChosen(f);
                     }));
                 }
             }

@@ -120,6 +120,7 @@ public final class AutoSubsSettings {
 
         addStremioSettings(fragment, screen, ctx);
         addSkinSettings(screen, ctx);
+        addAudioSettings(screen, ctx);
 
         Preference system = new Preference(ctx);
         system.setTitle(R.string.autosubs_item_system);
@@ -288,6 +289,23 @@ public final class AutoSubsSettings {
         title.setDefaultValue(PlayerSkin.TITLE_CODE_EPISODE);
         title.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
         add(category, title);
+    }
+
+    private static void addAudioSettings(PreferenceScreen screen, Context ctx) {
+        PreferenceCategory category = new PreferenceCategory(ctx);
+        category.setTitle(R.string.audio_category);
+        screen.addPreference(category);
+
+        ListPreference original = new ListPreference(ctx);
+        original.setKey(AutoSubsPrefs.KEY_AUDIO_ORIGINAL);
+        original.setTitle(R.string.audio_original);
+        original.setDialogTitle(R.string.audio_original);
+        original.setEntries(ctx.getResources().getStringArray(R.array.audio_original_names));
+        original.setEntryValues(new String[]{autosubs.core.OriginalLanguage.OFF, autosubs.core.OriginalLanguage.ANIME,
+                autosubs.core.OriginalLanguage.ASIAN, autosubs.core.OriginalLanguage.ALL});
+        original.setDefaultValue(autosubs.core.OriginalLanguage.ANIME);
+        original.setSummaryProvider(p -> ((ListPreference) p).getEntry() + "\n" + ctx.getString(R.string.audio_original_summary));
+        add(category, original);
     }
 
     private static void add(PreferenceCategory category, Preference p) {

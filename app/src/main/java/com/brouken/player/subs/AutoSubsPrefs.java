@@ -25,6 +25,7 @@ final class AutoSubsPrefs {
     static final String KEY_OS_USERNAME = "autosubs_os_username";
     static final String KEY_OS_PASSWORD = "autosubs_os_password";
     static final String CHOICE_OFF = "off";
+    static final String KEY_AUDIO_ORIGINAL = "audio_original";
     static final String KEY_STREMIO_SYNC = "stremio_sync";
     static final String KEY_STREMIO_AUTH = "stremio_auth_key";
     static final String KEY_STREMIO_EMAIL = "stremio_email";
@@ -137,6 +138,20 @@ final class AutoSubsPrefs {
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    /** Original-language audio: off, anime, asian or all (autosubs.core.OriginalLanguage). */
+    String audioOriginal() {
+        return settings.getString(KEY_AUDIO_ORIGINAL, autosubs.core.OriginalLanguage.ANIME);
+    }
+
+    /** Audio language the user chose for a series or movie (by IMDb id), or null. */
+    String audioChoice(String imdbId) {
+        return imdbId == null ? null : files.getString("audio:" + imdbId, null);
+    }
+
+    void setAudioChoice(String imdbId, String language) {
+        if (imdbId != null && language != null) files.edit().putString("audio:" + imdbId, language).apply();
     }
 
     String choice(String fileKey) {

@@ -103,4 +103,14 @@
     <string name="skin_aspect_crop">Bijsnijden</string>
     <string name="skin_aspect_zoom">Zoomen…</string>
     <string name="skin_menu_track">Spoor %d</string>
+    <string name="audio_category">Audio</string>
+    <string name="audio_original">Originele taal voor</string>
+    <string name="audio_original_summary">Anime in het Japans, Koreaanse series in het Koreaans, … (via Cinemeta). Een spoor dat je in het audiomenu kiest, wordt per serie of film onthouden.</string>
+    <string name="skin_audio_remembered">%s onthouden voor deze titel</string>
+    <string-array name="audio_original_names">
+        <item>Nooit</item>
+        <item>Anime</item>
+        <item>Anime + Aziatische series en films</item>
+        <item>Alles</item>
+    </string-array>
 </resources>
