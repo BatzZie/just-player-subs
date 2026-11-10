@@ -633,7 +633,11 @@ public class PlayerActivity extends Activity {
         controls.addView(exoSettings);
 
         exoBasicControls.addView(horizontalScrollView);
-        autoSubs.setSkin(com.brouken.player.subs.PlayerSkin.apply(this, playerView, titleView));
+        autoSubs.setSkin(com.brouken.player.subs.PlayerSkin.apply(this, playerView, titleView, new com.brouken.player.subs.PlayerSkin.Actions(
+                () -> startActivityForResult(new Intent(this, SettingsActivity.class), REQUEST_SETTINGS),
+                () -> { if (!isTvBox && mPrefs.askScope) askForScope(true, false); else loadSubtitleFile(mPrefs.mediaUri); },
+                mode -> { playerView.setScale(1.f); playerView.setResizeMode(mode); updatebuttonAspectRatioIcon(); resetHideCallbacks(); },
+                isTvBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N ? () -> { scaleStart(); updatebuttonAspectRatioIcon(); } : null)));
 
         if (Build.VERSION.SDK_INT > 23) {
             horizontalScrollView.setOnScrollChangeListener((view, i, i1, i2, i3) -> resetHideCallbacks());

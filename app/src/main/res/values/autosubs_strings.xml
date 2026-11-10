@@ -91,4 +91,16 @@
     <string name="stremio_next">Next</string>
     <string name="autosubs_resumed">Continuing at %s</string>
     <string name="autosubs_sync_segments">Synced in %d parts (other cut)</string>
+    <string name="skin_menu_subtitles">Subtitles</string>
+    <string name="skin_menu_builtin">Built-in</string>
+    <string name="skin_menu_forced">forced</string>
+    <string name="skin_menu_subtitle_file">Subtitle from file…</string>
+    <string name="skin_menu_audio">Audio</string>
+    <string name="skin_menu_no_audio">No audio tracks</string>
+    <string name="skin_menu_speed">Speed</string>
+    <string name="skin_menu_aspect">Picture</string>
+    <string name="skin_aspect_fit">Fit</string>
+    <string name="skin_aspect_crop">Crop</string>
+    <string name="skin_aspect_zoom">Zoom…</string>
+    <string name="skin_menu_track">Track %d</string>
 </resources>

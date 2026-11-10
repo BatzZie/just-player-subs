@@ -159,6 +159,7 @@ public final class AutoSubs implements Player.Listener {
 
     public void setSkin(PlayerSkin skin) {
         this.skin = skin;
+        if (skin != null) skin.setAutoSubs(this);
     }
 
     /** Title parts from the file name, until Cinemeta answers. */
@@ -301,6 +302,7 @@ public final class AutoSubs implements Player.Listener {
         startPositionMs = -1;
         mediaId = null;
         titleFromMeta = false;
+        pendingEmbeddedChoice = null;
         resumeChecked = false;
     }
 
@@ -706,8 +708,15 @@ public final class AutoSubs implements Player.Listener {
     }
 
     private void autoPick() {
-        if (ranked.isEmpty()) return;
         String remembered = prefs.choice(fileKey);
+        if (remembered != null && remembered.startsWith(CHOICE_EMBEDDED)) {
+            // The user chose a built-in subtitle for this video earlier
+            embeddedChosen = true;
+            pendingEmbeddedChoice = remembered.substring(CHOICE_EMBEDDED.length());
+            applyEmbeddedChoice();
+            return;
+        }
+        if (ranked.isEmpty()) return;
         if (AutoSubsPrefs.CHOICE_OFF.equals(remembered)) {
             userOff = true;
             return;
@@ -716,6 +725,117 @@ public final class AutoSubs implements Player.Listener {
         boolean auto = c == null;
         if (c == null) c = ranked.get(0);
         select(c, auto);
+    }
+
+    private static final String CHOICE_EMBEDDED = "embedded:";
+    private String pendingEmbeddedChoice;
+
+    /** Key of a built-in track for the per-file memory: language and label. */
+    private static String embeddedKey(Format f) {
+        return (f.language == null ? "" : f.language) + "|" + (f.label == null ? "" : f.label);
+    }
+
+    /** Selects the remembered built-in track once the tracks are known. */
+    private void applyEmbeddedChoice() {
+        if (pendingEmbeddedChoice == null || player == null) return;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int i = 0; i < group.length; i++) {
+                if (embeddedKey(group.getTrackFormat(i)).equals(pendingEmbeddedChoice)) {
+                    pendingEmbeddedChoice = null;
+                    showEmbedded(group, i, false);
+                    return;
+                }
+            }
+        }
+    }
+
+    /** Shows a built-in subtitle track (instead of an online one). */
+    private void showEmbedded(Tracks.Group group, int index, boolean remember) {
+        if (player == null) return;
+        deactivate();
+        embeddedChosen = true;
+        userOff = false;
+        TrackSelectionParameters params = player.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), index))
+                .build();
+        // Still ours: we keep drawing (or not drawing) on top of the player's track
+        owning = true;
+        ownTextSelection = textSelection(params);
+        player.setTrackSelectionParameters(params);
+        Format f = group.getTrackFormat(index);
+        if (remember) prefs.setChoice(fileKey, CHOICE_EMBEDDED + embeddedKey(f));
+        if (skin != null) skin.setSubtitleLanguage(f.language != null ? f.language : "und");
+        Log.i(TAG, "Built-in subtitle chosen: " + f.language + " " + f.label);
+    }
+
+    private void subtitlesOff() {
+        deactivate();
+        userOff = true;
+        embeddedChosen = false;
+        prefs.setChoice(fileKey, AutoSubsPrefs.CHOICE_OFF);
+        clearCues();
+    }
+
+    /**
+     * The subtitle menu (one press on the subtitle button): off, the built-in tracks, a line, the online subtitles
+     * in the order of the language settings, and the actions.
+     */
+    List<SkinMenu.Item> subtitleMenu() {
+        List<SkinMenu.Item> items = new ArrayList<>();
+        boolean nothing = active == null && !embeddedChosen;
+        items.add(SkinMenu.Item.option(activity.getString(R.string.autosubs_off), null, nothing, this::subtitlesOff));
+
+        List<SkinMenu.Item> builtIn = new ArrayList<>();
+        if (player != null) {
+            int n = 0;
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+                for (int i = 0; i < group.length; i++) {
+                    n++;
+                    if (!group.isTrackSupported(i)) continue;
+                    Format f = group.getTrackFormat(i);
+                    String name = skin != null ? skin.trackName(f, n) : String.valueOf(f.language);
+                    String detail = isForced(f) ? activity.getString(R.string.skin_menu_forced) : null;
+                    boolean shown = active == null && embeddedChosen && group.isTrackSelected(i);
+                    final Tracks.Group g = group;
+                    final int index = i;
+                    builtIn.add(SkinMenu.Item.option(name, detail, shown, () -> showEmbedded(g, index, true)));
+                }
+            }
+        }
+        if (!builtIn.isEmpty()) {
+            items.add(SkinMenu.Item.header(activity.getString(R.string.skin_menu_builtin)));
+            items.addAll(builtIn);
+        }
+
+        items.add(SkinMenu.Item.divider());
+        items.add(SkinMenu.Item.header(activity.getString(R.string.autosubs_menu_title) + " · " + statusText()));
+        for (int i = 0; i < ranked.size(); i++) {
+            SubtitleCandidate c = ranked.get(i);
+            String detail = i == 0 ? "★" : null;
+            items.add(SkinMenu.Item.option(shortLabel(c), detail, c == active, () -> {
+                if (c == active) return;
+                prefs.setChoice(fileKey, c.id);
+                // A different subtitle needs its own timing
+                prefs.removeOffset(fileKey);
+                select(c, false);
+            }));
+        }
+
+        items.add(SkinMenu.Item.divider());
+        if (active != null) {
+            items.add(SkinMenu.Item.action(activity.getString(R.string.autosubs_item_timing, formatOffset(offsetMs)), this::enterTimingMode));
+            items.add(SkinMenu.Item.action(activity.getString(syncWanted ? R.string.autosubs_item_sync_running : R.string.autosubs_item_sync), () -> {
+                if (indexRefs != null) syncFromIndex(true);
+                else if (!syncWanted) startSync(true);
+            }));
+        }
+        if (status != Status.SEARCHING) items.add(SkinMenu.Item.action(activity.getString(R.string.autosubs_item_search_again), this::searchAgain));
+        Runnable file = skin != null ? skin.openSubtitleFileAction() : null;
+        if (file != null) items.add(SkinMenu.Item.action(activity.getString(R.string.skin_menu_subtitle_file), file));
+        return items;
     }
 
     private SubtitleCandidate find(String id) {
@@ -784,6 +904,7 @@ public final class AutoSubs implements Player.Listener {
                 Log.i(TAG, "Using embedded subtitle " + embedded.language + " instead of " + c);
                 toast(activity.getString(R.string.autosubs_embedded_used,
                         Languages.displayName(Languages.canonical(embedded.language))));
+                if (skin != null) skin.setSubtitleLanguage(embedded.language);
                 return;
             }
         }
@@ -871,6 +992,7 @@ public final class AutoSubs implements Player.Listener {
         Format embedded = selectedEmbeddedText();
         if (embedded != null && languageRank(embedded.language) >= 0) {
             embeddedChosen = true;
+            if (skin != null) skin.setSubtitleLanguage(embedded.language);
             Log.i(TAG, "No online subtitle, showing embedded " + embedded.language);
         }
     }
@@ -1314,6 +1436,7 @@ public final class AutoSubs implements Player.Listener {
             titleFromFileName();
             skin.setTracks(tracks);
         }
+        applyEmbeddedChoice();
         updateEmbeddedChoice();
     }
 

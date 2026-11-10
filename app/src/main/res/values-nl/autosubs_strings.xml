@@ -91,4 +91,16 @@
     <string name="stremio_next">Volgende</string>
     <string name="autosubs_resumed">Verder vanaf %s</string>
     <string name="autosubs_sync_segments">Gesynchroniseerd in %d delen (andere versie)</string>
+    <string name="skin_menu_subtitles">Ondertitels</string>
+    <string name="skin_menu_builtin">Ingebouwd</string>
+    <string name="skin_menu_forced">geforceerd</string>
+    <string name="skin_menu_subtitle_file">Ondertitel uit bestand…</string>
+    <string name="skin_menu_audio">Audio</string>
+    <string name="skin_menu_no_audio">Geen audiosporen</string>
+    <string name="skin_menu_speed">Snelheid</string>
+    <string name="skin_menu_aspect">Beeld</string>
+    <string name="skin_aspect_fit">Passend</string>
+    <string name="skin_aspect_crop">Bijsnijden</string>
+    <string name="skin_aspect_zoom">Zoomen…</string>
+    <string name="skin_menu_track">Spoor %d</string>
 </resources>

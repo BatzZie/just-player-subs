@@ -35,10 +35,13 @@ import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.util.Util;
 import androidx.media3.ui.TimeBar;
 import androidx.media3.ui.DefaultTimeBar;
+import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 import androidx.preference.PreferenceManager;
 
@@ -87,8 +90,31 @@ public final class PlayerSkin {
     static final String TIME_REMAINING = "remaining";
     static final String TIME_END = "end";
 
+    /** What only PlayerActivity can do, for the menus. */
+    public static final class Actions {
+        final Runnable openSettings;
+        final Runnable openSubtitleFile;
+        final java.util.function.IntConsumer setResizeMode;
+        final Runnable zoom;
+
+        public Actions(Runnable openSettings, Runnable openSubtitleFile, java.util.function.IntConsumer setResizeMode, Runnable zoom) {
+            this.openSettings = openSettings;
+            this.openSubtitleFile = openSubtitleFile;
+            this.setResizeMode = setResizeMode;
+            this.zoom = zoom;
+        }
+    }
+
+    /** Id Just Player gives its aspect ratio button. */
+    private static final int ASPECT_BUTTON_ID = Integer.MAX_VALUE - 100;
+    private static final float[] SPEEDS = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f};
+
     private final Activity activity;
     private final TextView titleView;
+    private Actions actions;
+    private AutoSubs autoSubs;
+    private ImageButton subtitleButton;
+    private TextView speedBadge;
     private final SharedPreferences prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
     private int accent;
@@ -114,6 +140,7 @@ public final class PlayerSkin {
         @Override
         public void onEvents(Player p, Player.Events events) {
             updatePlayButton();
+            if (events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)) updateSpeedBadge();
         }
     };
 
@@ -124,8 +151,9 @@ public final class PlayerSkin {
     }
 
     /** Call once, after PlayerActivity has built its controls. */
-    public static PlayerSkin apply(Activity activity, PlayerView playerView, TextView titleView) {
+    public static PlayerSkin apply(Activity activity, PlayerView playerView, TextView titleView, Actions actions) {
         PlayerSkin skin = new PlayerSkin(activity, titleView);
+        skin.actions = actions;
         skin.enabled = skin.prefs.getBoolean(KEY_ENABLED, true);
         if (!skin.enabled) return skin;
         try {
@@ -180,11 +208,17 @@ public final class PlayerSkin {
                 controls.addView(open);
             }
             movePlayPauseIntoRow(playerView, controls);
+            View cc = replaceSubtitleButton(playerView, controls);
+            addMenuButtons(controls);
             for (int i = 0; i < controls.getChildCount(); i++) {
                 View child = controls.getChildAt(i);
                 if (child instanceof ImageButton) styleButton((ImageButton) child);
+                // One short press per button: no hidden long-press actions
+                child.setOnLongClickListener(null);
+                child.setLongClickable(false);
             }
-            addSubtitleBadge(controls, playerView.findViewById(R.id.exo_subtitle));
+            addSubtitleBadge(controls, cc);
+            speedBadge = addBadge(controls, speedButton);
             controls.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> linkFocus());
         }
 
@@ -221,7 +255,180 @@ public final class PlayerSkin {
             titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             titleView.setShadowLayer(dp(3), 0, dp(1), 0xAA000000);
             titleView.setPadding(dp(28), dp(18), dp(28), dp(8));
+            titleView.setOnLongClickListener(null);
+            titleView.setLongClickable(false);
         }
+    }
+
+    // ---------------------------------------------------------------- buttons with a menu above them
+
+    void setAutoSubs(AutoSubs autoSubs) {
+        this.autoSubs = autoSubs;
+    }
+
+    /** Our own subtitle button: one list with built-in and online subtitles (Media3's disables itself without built-in tracks). */
+    private View replaceSubtitleButton(PlayerView playerView, LinearLayout controls) {
+        View original = playerView.findViewById(R.id.exo_subtitle);
+        int index = original != null && original.getParent() == controls ? controls.indexOfChild(original) : 1;
+        if (original != null && original.getParent() == controls) controls.removeView(original);
+        subtitleButton = new ImageButton(activity);
+        subtitleButton.setImageResource(R.drawable.exo_ic_subtitle_off);
+        subtitleButton.setContentDescription(activity.getString(R.string.skin_menu_subtitles));
+        subtitleButton.setFocusable(true);
+        subtitleButton.setId(View.generateViewId());
+        subtitleButton.setOnClickListener(v -> {
+            if (autoSubs != null) {
+                SkinMenu.show(activity, playerView, v, accent, activity.getString(R.string.skin_menu_subtitles), autoSubs.subtitleMenu());
+            }
+        });
+        controls.addView(subtitleButton, Math.min(index, controls.getChildCount()));
+        return subtitleButton;
+    }
+
+    private ImageButton audioButton, speedButton;
+
+    /** Audio and speed buttons after the subtitle button; aspect ratio gets a menu, the gear opens the settings. */
+    private void addMenuButtons(LinearLayout controls) {
+        int index = subtitleButton != null ? controls.indexOfChild(subtitleButton) + 1 : controls.getChildCount();
+        audioButton = new ImageButton(activity);
+        audioButton.setImageResource(R.drawable.exo_ic_audiotrack);
+        audioButton.setContentDescription(activity.getString(R.string.skin_menu_audio));
+        audioButton.setFocusable(true);
+        audioButton.setId(View.generateViewId());
+        audioButton.setOnClickListener(this::showAudioMenu);
+        controls.addView(audioButton, index);
+        speedButton = new ImageButton(activity);
+        speedButton.setImageResource(R.drawable.exo_ic_speed);
+        speedButton.setContentDescription(activity.getString(R.string.skin_menu_speed));
+        speedButton.setFocusable(true);
+        speedButton.setId(View.generateViewId());
+        speedButton.setOnClickListener(this::showSpeedMenu);
+        controls.addView(speedButton, index + 1);
+
+        View aspect = controls.findViewById(ASPECT_BUTTON_ID);
+        if (aspect != null) aspect.setOnClickListener(this::showAspectMenu);
+        View settings = controls.findViewById(R.id.exo_settings);
+        if (settings != null && actions != null) settings.setOnClickListener(v -> actions.openSettings.run());
+    }
+
+    private void showAudioMenu(View anchor) {
+        List<SkinMenu.Item> items = new ArrayList<>();
+        if (player != null) {
+            int n = 0;
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+                for (int i = 0; i < group.length; i++) {
+                    n++;
+                    if (!group.isTrackSupported(i)) continue;
+                    Format f = group.getTrackFormat(i);
+                    final Tracks.Group g = group;
+                    final int track = i;
+                    items.add(SkinMenu.Item.option(trackName(f, n), audioDetail(f), group.isTrackSelected(i), () -> {
+                        if (player == null) return;
+                        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                                .setOverrideForType(new TrackSelectionOverride(g.getMediaTrackGroup(), track))
+                                .build());
+                    }));
+                }
+            }
+        }
+        if (items.isEmpty()) items.add(SkinMenu.Item.header(activity.getString(R.string.skin_menu_no_audio)));
+        SkinMenu.show(activity, playerView, anchor, accent, activity.getString(R.string.skin_menu_audio), items);
+    }
+
+    private void showSpeedMenu(View anchor) {
+        if (player == null) return;
+        float current = player.getPlaybackParameters().speed;
+        List<SkinMenu.Item> items = new ArrayList<>();
+        for (float s : SPEEDS) {
+            items.add(SkinMenu.Item.option(speedText(s), null, Math.abs(current - s) < 0.01f, () -> {
+                if (player == null) return;
+                player.setPlaybackSpeed(s);
+                updateSpeedBadge();
+            }));
+        }
+        SkinMenu.show(activity, playerView, anchor, accent, activity.getString(R.string.skin_menu_speed), items);
+    }
+
+    private void showAspectMenu(View anchor) {
+        if (playerView == null || actions == null) return;
+        int mode = playerView.getResizeMode();
+        List<SkinMenu.Item> items = new ArrayList<>();
+        items.add(SkinMenu.Item.option(activity.getString(R.string.skin_aspect_fit), null, mode == AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                () -> actions.setResizeMode.accept(AspectRatioFrameLayout.RESIZE_MODE_FIT)));
+        items.add(SkinMenu.Item.option(activity.getString(R.string.skin_aspect_crop), null, mode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+                () -> actions.setResizeMode.accept(AspectRatioFrameLayout.RESIZE_MODE_ZOOM)));
+        if (actions.zoom != null) items.add(SkinMenu.Item.action(activity.getString(R.string.skin_aspect_zoom), actions.zoom));
+        SkinMenu.show(activity, playerView, anchor, accent, activity.getString(R.string.skin_menu_aspect), items);
+    }
+
+    /** "Ondertitel uit bestand…" in the subtitle menu. */
+    Runnable openSubtitleFileAction() {
+        return actions != null ? actions.openSubtitleFile : null;
+    }
+
+    PlayerView playerView() {
+        return playerView;
+    }
+
+    int accent() {
+        return accent;
+    }
+
+    private static String speedText(float s) {
+        String t = s == (int) s ? String.valueOf((int) s) : String.valueOf(s);
+        return t.replace('.', ',') + "×";
+    }
+
+    private void updateSpeedBadge() {
+        if (speedBadge == null || player == null) return;
+        float s = player.getPlaybackParameters().speed;
+        if (Math.abs(s - 1f) < 0.01f) {
+            speedBadge.setVisibility(View.GONE);
+        } else {
+            speedBadge.setText(speedText(s));
+            speedBadge.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /** "Japans", "Engels · Commentary", or "Spoor 2". */
+    String trackName(Format f, int number) {
+        List<String> parts = new ArrayList<>();
+        if (f.language != null && !"und".equals(f.language)) {
+            parts.add(autosubs.core.Languages.displayName(autosubs.core.Languages.canonical(f.language)));
+        }
+        if (f.label != null && !f.label.trim().isEmpty() && (parts.isEmpty() || !f.label.equalsIgnoreCase(parts.get(0)))) {
+            parts.add(f.label.trim());
+        }
+        if (parts.isEmpty()) parts.add(activity.getString(R.string.skin_menu_track, number));
+        return android.text.TextUtils.join(" · ", parts);
+    }
+
+    /** "5.1 · Dolby Digital+" */
+    static String audioDetail(Format f) {
+        List<String> parts = new ArrayList<>();
+        if (f.channelCount >= 8) parts.add("7.1");
+        else if (f.channelCount >= 6) parts.add("5.1");
+        else if (f.channelCount == 2) parts.add("Stereo");
+        else if (f.channelCount == 1) parts.add("Mono");
+        String mime = f.sampleMimeType == null ? "" : f.sampleMimeType;
+        String codec;
+        switch (mime) {
+            case MimeTypes.AUDIO_E_AC3_JOC: codec = "Atmos"; break;
+            case MimeTypes.AUDIO_E_AC3: codec = "Dolby Digital+"; break;
+            case MimeTypes.AUDIO_AC3: codec = "Dolby Digital"; break;
+            case MimeTypes.AUDIO_TRUEHD: codec = "TrueHD"; break;
+            case MimeTypes.AUDIO_AAC: codec = "AAC"; break;
+            case MimeTypes.AUDIO_FLAC: codec = "FLAC"; break;
+            case MimeTypes.AUDIO_OPUS: codec = "Opus"; break;
+            case MimeTypes.AUDIO_VORBIS: codec = "Vorbis"; break;
+            case MimeTypes.AUDIO_MPEG: codec = "MP3"; break;
+            case MimeTypes.AUDIO_RAW: codec = "PCM"; break;
+            default: codec = mime.startsWith(MimeTypes.AUDIO_DTS) ? "DTS" : null;
+        }
+        if (codec != null) parts.add(codec);
+        return android.text.TextUtils.join(" · ", parts);
     }
 
     /**
@@ -503,6 +710,7 @@ public final class PlayerSkin {
         if (!enabled) return;
         player.addListener(playerListener);
         updatePlayButton();
+        updateSpeedBadge();
         setBarColors();
         linkFocus();
         main.removeCallbacks(tick);
@@ -548,24 +756,32 @@ public final class PlayerSkin {
 
     /** Small label next to the subtitle button with the language of the online subtitle ("NL"). */
     private void addSubtitleBadge(LinearLayout controls, View subtitleButton) {
-        if (subtitleButton == null) return;
-        int index = controls.indexOfChild(subtitleButton);
-        if (index < 0) return;
-        subtitleBadge = new TextView(activity);
-        subtitleBadge.setTextColor(Color.WHITE);
-        subtitleBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        subtitleBadge.setTypeface(Typeface.DEFAULT_BOLD);
-        subtitleBadge.setFocusable(false);
-        subtitleBadge.setVisibility(View.GONE);
+        subtitleBadge = addBadge(controls, subtitleButton);
+    }
+
+    private TextView addBadge(LinearLayout controls, View button) {
+        if (button == null) return null;
+        int index = controls.indexOfChild(button);
+        if (index < 0) return null;
+        TextView badge = new TextView(activity);
+        badge.setTextColor(Color.WHITE);
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setFocusable(false);
+        badge.setVisibility(View.GONE);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT);
         lp.setMargins(0, 0, dp(6), 0);
-        subtitleBadge.setGravity(Gravity.CENTER_VERTICAL);
-        controls.addView(subtitleBadge, index + 1, lp);
+        badge.setGravity(Gravity.CENTER_VERTICAL);
+        controls.addView(badge, index + 1, lp);
+        return badge;
     }
 
-    /** Language code (e.g. "nld") of the active online subtitle, or null when none is active. */
+    /** Language code (e.g. "nld") of the subtitle that is shown, or null when none is shown. */
     public void setSubtitleLanguage(String lang) {
+        if (subtitleButton != null) {
+            subtitleButton.setImageResource(lang != null ? R.drawable.exo_ic_subtitle_on : R.drawable.exo_ic_subtitle_off);
+        }
         if (subtitleBadge == null) return;
         String iso1 = lang == null ? null : autosubs.core.Languages.toIso1(lang);
         if (iso1 == null) {
@@ -695,7 +911,7 @@ public final class PlayerSkin {
 
     // ---------------------------------------------------------------- helpers
 
-    private static boolean isLight(int color) {
+    static boolean isLight(int color) {
         double l = 0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color);
         return l > 186;
     }
