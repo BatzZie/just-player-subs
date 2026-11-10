@@ -29,6 +29,8 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
 - Audio in the original language: anime in Japanese by default (Cinemeta: Animation from Japan), optionally
   Asian titles or everything in the language of their country; an audio track picked in the menu is remembered
   per series or movie.
+- "Auto frame rate matching" works with streams: the frame rate is measured from the shown frames (~4 s) and
+  the TV switches to an exact multiple (23.976 Hz for films), pausing during the HDMI switch.
 - Recovers from playback errors (decoder/audio glitches, stream network errors) by restarting at the same
   position, at most 3 times in 5 minutes. FLAC is decoded by FFmpeg: Android's software FLAC decoder made Media3
   fail at the same point of a file every time.
