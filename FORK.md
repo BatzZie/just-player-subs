@@ -37,7 +37,10 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
 
 - Settings → "Online subtitles": languages, automatic search, prefer built-in, auto sync, OpenSubtitles.com;
   "Stremio": account login and progress sync; "Player look": modern controls, accent color, time format, title format.
-- In the player: long press the subtitle button → choose subtitle, adjust timing, auto sync.
+- In the player, every button works with one short press (no long presses); menus open right above their
+  button. Subtitles: off, built-in tracks, online subtitles (in language order), timing, auto sync, search again,
+  subtitle from file. Separate audio and speed buttons; aspect ratio menu (fit, crop, zoom); the gear opens the
+  settings.
 - Logs: `adb logcat -s AutoSubs` (stream tokens are redacted).
 
 ## Code
