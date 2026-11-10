@@ -14,6 +14,8 @@ object FineSync {
     private const val LOCAL_RANGE_MS = 3000L
     private const val LOCAL_STEP_MS = 20L
     private const val LOCAL_MATCH_MS = 200L
+    private const val BOUNDARY_SEARCH_MS = 20_000L
+    private const val MIN_GAP_MS = 300L
     private const val MIN_STEP_MS = 150L
     private const val MIN_LINES = 10
     private const val MAX_LINES = 900
@@ -129,10 +131,54 @@ object FineSync {
                 }
             }
         }
+        val offsets = cuts.map { offsetMs + Math.round(median(x, it) / 10.0) * 10 }
+        // Exact boundaries: the measurement above looks at ~30 s around each line, so a boundary can be a few
+        // seconds off. Line by line near each boundary, see which of the two offsets puts it on a reference line,
+        // and switch between the last line of one part and the first line of the next (in video time).
         val result = ArrayList<SegmentSync.Segment>()
-        for ((k, seg) in cuts.withIndex()) {
-            val start = if (k == 0) 0L else (pairs[seg[0] - 1].timeMs + pairs[seg[0]].timeMs) / 2
-            result.add(SegmentSync.Segment(start, offsetMs + Math.round(median(x, seg) / 10.0) * 10))
+        result.add(SegmentSync.Segment(0L, offsets[0]))
+        for (k in 1 until cuts.size) {
+            val a = offsets[k - 1]
+            val b = offsets[k]
+            val rough = (pairs[cuts[k][0] - 1].timeMs + pairs[cuts[k][0]].timeMs) / 2
+            val lo = times.indexOfFirst { it >= rough - BOUNDARY_SEARCH_MS }.let { if (it < 0) times.size else it }
+            val hi = times.indexOfLast { it <= rough + BOUNDARY_SEARCH_MS } + 1
+            var bestSplit = times.indexOfFirst { it >= rough }.let { if (it < 0) times.size else it }
+            if (hi > lo) {
+                // score(split) = lines before it that fit with a + lines from it on that fit with b
+                val fitsA = BooleanArray(hi - lo) { fits(refs, times[lo + it] - offsetMs + a) }
+                val fitsB = BooleanArray(hi - lo) { fits(refs, times[lo + it] - offsetMs + b) }
+                var score = fitsB.count { it }
+                var bestScore = -1
+                var bestGap = -1L
+                for (split in lo..hi) {
+                    if (split > lo) {
+                        if (fitsA[split - 1 - lo]) score++
+                        if (fitsB[split - 1 - lo]) score--
+                    }
+                    // The pause between the two lines at this split (as shown); a cut in the edit is usually at a
+                    // scene change, so on a tie the longest pause wins
+                    val gap = if (split <= 0 || split >= times.size) Long.MAX_VALUE / 4
+                        else (times[split] - offsetMs + b) - (times[split - 1] - offsetMs + a)
+                    // Never show a line before the one before it
+                    if (gap < MIN_GAP_MS) continue
+                    if (score > bestScore || (score == bestScore && gap > bestGap)) {
+                        bestScore = score
+                        bestGap = gap
+                        bestSplit = split
+                    }
+                }
+            }
+            val from = when {
+                bestSplit <= 0 -> 0L
+                bestSplit >= times.size -> times.last() - offsetMs + a + 1
+                else -> {
+                    val lastA = times[bestSplit - 1] - offsetMs + a
+                    val firstB = times[bestSplit] - offsetMs + b
+                    if (firstB > lastA) (lastA + firstB) / 2 else firstB
+                }
+            }
+            result.add(SegmentSync.Segment(maxOf(from, result.last().fromMs + 1), b))
         }
         if (result.size == 1 && abs(result[0].offsetMs - offsetMs) < MIN_CORRECTION_MS) return null
         var matched = 0
@@ -142,6 +188,11 @@ object FineSync {
         }
         CoreLog.i("FineSync: ${pairs.size} lines, segments " + result.joinToString(" ") { "${it.fromMs / 1000}s:${it.offsetMs}" })
         return SegmentSync.Result(result, matched, pairs.size)
+    }
+
+    private fun fits(refs: List<Long>, displayMs: Long): Boolean {
+        val r = nearest(refs, displayMs) ?: return false
+        return abs(r - displayMs) <= LOCAL_MATCH_MS
     }
 
     /** Sum of distances to the median of a sorted array. */
