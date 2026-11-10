@@ -36,7 +36,9 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
   below that the position is written to the account (from 5 s, repaired when Stremio overwrites it); resume
   reads the account. After a completion the player checks the account for the watched mark and sets only that
   mark if Stremio's own sync lost it (happens when Stremio autoplays the next episode). Unidentified videos send
-  no result (Stremio would mark them watched).
+  no result (Stremio would mark them watched). The player only updates titles Stremio already has in the
+  library (never adds one), sends a completion only when the video really played to 90% of a known duration,
+  and gives one result per video.
 
 ## Using it
 
