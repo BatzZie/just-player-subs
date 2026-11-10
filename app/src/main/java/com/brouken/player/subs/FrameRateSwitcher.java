@@ -20,13 +20,14 @@ import java.util.Arrays;
  * Switches the TV to the refresh rate of the video (e.g. 23.976 Hz for films), like Stremio's own player does.
  * Replaces Just Player's "Auto frame rate matching", which measures the frame rate with a second connection to
  * the stream (MediaExtractor) and did nothing for debrid streams. Here the frame rate comes from the frames the
- * player already shows (about half a second of them); playback pauses while the TV switches so audio
+ * player already shows (about 4 s of them); playback pauses while the TV switches so audio
  * passthrough isn't cut off.
  */
 final class FrameRateSwitcher {
     /** Just Player's setting, reused (same meaning, working implementation). */
     static final String KEY = "frameRateMatching";
-    private static final int SAMPLES = 36;
+    /** About 4 s of frames: MKV times are whole ms, and 24 vs 23.976 fps differ only 0.1% */
+    private static final int SAMPLES = 96;
     private static final long SWITCH_TIMEOUT_MS = 4000;
 
     private final Activity activity;
@@ -42,12 +43,16 @@ final class FrameRateSwitcher {
         this.activity = activity;
     }
 
-    /** For each new video (and new player). */
-    void attach(Player p, boolean enabled) {
+    /**
+     * @param newVideo false when Just Player made a new player for the same video: keep going if not done yet
+     */
+    void attach(Player p, boolean enabled, boolean newVideo) {
         detach();
-        done = !enabled || !(p instanceof ExoPlayer);
-        count = 0;
-        if (done) return;
+        if (newVideo) {
+            done = !enabled;
+            count = 0;
+        }
+        if (done || !(p instanceof ExoPlayer)) return;
         player = (ExoPlayer) p;
         player.setVideoFrameMetadataListener(frames);
     }
@@ -74,21 +79,35 @@ final class FrameRateSwitcher {
         for (int i = 0; i < SAMPLES; i++) d[i] = pts[i + 1] - pts[i];
         Arrays.sort(d);
         long median = d[SAMPLES / 2];
-        // A steady stream: nearly all frames the same distance apart (variable frame rate: leave the TV alone)
+        // A steady stream: nearly all frames the same distance apart (variable frame rate: leave the TV alone).
+        // MKV times are whole ms, so 23.976 fps alternates 41 and 42 ms: allow that.
         long low = d[SAMPLES / 6], high = d[SAMPLES - 1 - SAMPLES / 6];
-        if (median <= 0 || high - low > median / 20) {
+        if (median <= 0 || high - low > Math.max(1500, median / 20)) {
             Log.i(AutoSubs.TAG, "Frame rate: not steady (" + low + ".." + high + " us), display unchanged");
             return;
         }
-        float fps = normalize(1_000_000f / median);
+        // The average over all frames, not the median (that would be 42 ms = 23.81 fps)
+        float fps = frameRate(pts, SAMPLES);
         main.post(() -> switchTo(fps, "measured"));
     };
+
+    static float frameRate(long[] pts, int intervals) {
+        return normalize(intervals * 1_000_000f / (pts[intervals] - pts[0]));
+    }
 
     /** Snaps to the usual rates (23.976, 24, 25, 29.97, 30, 50, 59.94, 60). */
     static float normalize(float fps) {
         float[] common = {24000f / 1001, 24f, 25f, 30000f / 1001, 30f, 50f, 60000f / 1001, 60f};
-        for (float c : common) if (Math.abs(fps - c) / c < 0.0015f) return c;
-        return fps;
+        float best = fps;
+        float bestDiff = 0.0015f;
+        for (float c : common) {
+            float diff = Math.abs(fps - c) / c;
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = c;
+            }
+        }
+        return best;
     }
 
     /** The mode with the same resolution whose refresh rate is a whole multiple of the frame rate (highest wins). */

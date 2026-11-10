@@ -261,10 +261,8 @@ public final class AutoSubs implements Player.Listener {
         player.addListener(launchTransition);
         if (skin != null) skin.onPlayerStarted(player);
         logDecoders(player);
-        if (uri == null || !uri.equals(mediaUri)) {
-            frameRate.attach(player, androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
-                    .getBoolean(FrameRateSwitcher.KEY, false));
-        }
+        frameRate.attach(player, androidx.preference.PreferenceManager.getDefaultSharedPreferences(activity)
+                .getBoolean(FrameRateSwitcher.KEY, false), uri == null || !uri.equals(mediaUri));
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
