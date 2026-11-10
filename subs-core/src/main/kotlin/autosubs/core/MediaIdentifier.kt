@@ -23,15 +23,29 @@ object MediaIdentifier {
     @JvmStatic
     fun lookup(info: ReleaseInfo?): MediaId? {
         val title = info?.title ?: return null
-        val type = if (info.isEpisode()) "series" else "movie"
+        val type = if (info.isSeries()) "series" else "movie"
         var id = search(type, title, info.year)
         if (id == null && info.year > 0) {
             // A year can be part of the title, e.g. "Blade Runner 2049"
             id = search(type, title + " " + info.year, -1)
         }
         if (id == null) return null
+        if (info.absoluteEpisode > 0) return fromAbsolute(id, info.absoluteEpisode)
         return if (info.isEpisode()) MediaId(id, info.season, info.episode) else MediaId(id, -1, -1)
     }
+
+    /** "Show - 27" -> the 27th regular episode in Cinemeta's order (specials, season 0, don't count). */
+    private fun fromAbsolute(id: String, absolute: Int): MediaId? {
+        val videos = StremioApi.fullMeta("series", id)?.videos ?: return null
+        val v = absoluteToVideo(videos, absolute) ?: return null
+        return MediaId(id, v.season!!.toInt(), v.episode!!.toInt())
+    }
+
+    @JvmStatic
+    fun absoluteToVideo(videos: List<WatchedBitField.Companion.Video>, absolute: Int): WatchedBitField.Companion.Video? =
+        videos.filter { (it.season ?: 0) > 0 && it.episode != null }
+            .sortedWith(compareBy({ it.season }, { it.episode }))
+            .getOrNull(absolute - 1)
 
     private fun search(type: String, title: String, year: Int): String? {
         val url = "$CINEMETA/catalog/$type/top/search=${UrlCodec.encode(title)}.json"

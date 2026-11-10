@@ -465,7 +465,13 @@ public final class AutoSubs implements Player.Listener {
         final long pos = lastPositionMs;
         final long dur = lastDurationMs;
         if (id != null && pos >= 0 && dur > 0) prefs.setResume(id.videoId(), pos, finished || pos >= dur * FINISHED);
-        if (authKey == null || id == null || dur <= 0 || pos < 0) return false;
+        if (authKey == null) return false;
+        if (id == null || dur <= 0 || pos < 0) {
+            // Not identified: we can't write the position, but a result would make Stremio mark it watched
+            // (its inverted check), which is worse than not saving the position.
+            Log.i(TAG, "Stremio: video not identified, position not written and no result sent");
+            return true;
+        }
         final boolean done = finished || pos >= dur * FINISHED;
         final long watched = Math.max(0, pos - Math.max(0, startPositionMs));
         if (done) return false; // handled by the completion result (Stremio is leading)

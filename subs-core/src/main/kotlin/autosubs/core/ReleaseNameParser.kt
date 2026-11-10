@@ -11,6 +11,10 @@ object ReleaseNameParser {
     private val NOT_A_GROUP = setOf("dl", "rip", "web", "x264", "x265", "h264", "h265", "hevc", "hd", "sd", "dts", "aac", "ac3")
     private val EPISODE_SXXEYY = Regex("(?i)\\bS(\\d{1,2})\\s?E(\\d{1,3})\\b")
     private val EPISODE_NXNN = Regex("(?i)\\b(\\d{1,2})x(\\d{2,3})\\b")
+    // Anime: "[Group] Show S1 - 01 (1080p)" or "[Group] Show - 27 [1080p]"
+    private val LEADING_GROUP = Regex("^\\[([^\\]]{1,40})\\]\\s*")
+    private val EPISODE_ANIME_SEASON = Regex("(?i)\\b(?:S|Season )(\\d{1,2}) - (\\d{1,4})\\b")
+    private val EPISODE_ANIME_ABSOLUTE = Regex(" - (\\d{1,4})(?:v\\d)?(?= |$)")
     private val YEAR = Regex("\\b(19\\d{2}|20\\d{2})\\b")
     private val QUALITY = Regex(
         "(?i)\\b(2160p|1080p|1080i|720p|576p|480p|4k|uhd|web ?dl|webrip|web|bluray|blu ray|bdrip|brrip|bdremux|remux" +
@@ -22,9 +26,15 @@ object ReleaseNameParser {
     fun parse(name: String?): ReleaseInfo {
         val info = ReleaseInfo()
         if (name == null) return info
-        val base = EXTENSION.replaceFirst(name.trim(), "")
+        var base = EXTENSION.replaceFirst(name.trim(), "")
 
-        GROUP.find(base)?.let { if (it.groupValues[1].lowercase(Locale.ROOT) !in NOT_A_GROUP) info.group = it.groupValues[1] }
+        val leading = LEADING_GROUP.find(base)
+        if (leading != null) {
+            info.group = leading.groupValues[1].trim()
+            base = base.substring(leading.range.last + 1)
+        } else {
+            GROUP.find(base)?.let { if (it.groupValues[1].lowercase(Locale.ROOT) !in NOT_A_GROUP) info.group = it.groupValues[1] }
+        }
 
         // Normalise separators and brackets to spaces
         val n = base.replace(Regex("[._\\[\\](){}]+"), " ").replace(Regex("\\s+"), " ").trim()
@@ -35,6 +45,21 @@ object ReleaseNameParser {
             info.season = e.groupValues[1].toInt()
             info.episode = e.groupValues[2].toInt()
             cut = minOf(cut, e.range.first)
+        } else {
+            val a = EPISODE_ANIME_SEASON.find(n)
+            if (a != null) {
+                info.season = a.groupValues[1].toInt()
+                info.episode = a.groupValues[2].toInt()
+                cut = minOf(cut, a.range.first)
+            } else if (leading != null) {
+                // Only with a leading [Group]: " - 27" is too common in other names
+                val abs = EPISODE_ANIME_ABSOLUTE.find(n)
+                val number = abs?.groupValues?.get(1)?.toInt() ?: -1
+                if (abs != null && number in 1..1899) {
+                    info.absoluteEpisode = number
+                    cut = minOf(cut, abs.range.first)
+                }
+            }
         }
 
         val qualityStart = QUALITY.find(n)?.range?.first ?: n.length

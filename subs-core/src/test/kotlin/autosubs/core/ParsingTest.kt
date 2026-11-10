@@ -26,6 +26,23 @@ class ReleaseNameParserTest {
     @Test fun groupWithTag() =
         assertEquals("MeGusta", ReleaseNameParser.parse("MobLand.S02E01.1080p.HEVC.x265-MeGusta[EZTVx.to]").group)
 
+    @Test fun animeWithSeason() = assertEquals(
+        "title=Attack On Titan year=-1 S1E2 group=Salieri source=null res=1080p",
+        p("[Salieri] Attack On Titan S1 - 02 (1080p) (HDR) [Dual Audio].mkv"))
+
+    @Test fun animeAbsoluteEpisode() = assertEquals(
+        "title=Shingeki no Kyojin year=-1 S-1E-1 abs=27 group=SubsPlease source=null res=1080p",
+        p("[SubsPlease] Shingeki no Kyojin - 27 (1080p) [ABCD1234].mkv"))
+
+    @Test fun dashWithoutLeadingGroupIsNoEpisode() =
+        assertEquals(-1, ReleaseNameParser.parse("Mission - 2 Impossible.mkv").absoluteEpisode)
+
+    @Test fun absoluteToSeasonEpisode() {
+        val v = (1..2).flatMap { s -> (1..(if (s == 1) 25 else 12)).map { e -> WatchedBitField.Companion.Video("x:$s:$e", s.toLong(), e.toLong(), null) } } +
+            WatchedBitField.Companion.Video("x:0:1", 0, 1, null)
+        assertEquals("x:2:2", MediaIdentifier.absoluteToVideo(v.shuffled(), 27)!!.id)
+    }
+
     @Test fun titleThatIsAYear() =
         assertEquals("title=2012 year=2009 S-1E-1 group=GRP source=BluRay res=1080p", p("2012.2009.1080p.BluRay.x264-GRP.mkv"))
 
