@@ -108,6 +108,22 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         return existing == null
     }
 
+    /**
+     * Safety net after a video was watched to the end: Stremio marks it itself, but can lose that mark again (its
+     * own library sync can overwrite it). Sets only the watched mark of this video if it is missing; the video
+     * the library points to, the position and everything else stay as they are.
+     * @return "already", "marked" or "missing" (not in the library, or no episode list)
+     */
+    @Throws(IOException::class)
+    fun ensureWatched(authKey: String, id: MediaId): String {
+        val existing = getLibraryItem(authKey, id.imdbId) ?: return "missing"
+        val ids = if (id.isSeries()) fullMeta(id.type(), id.imdbId)?.let { WatchedBitField.sortedVideoIds(it.videos) } else null
+        if (id.isSeries() && ids.isNullOrEmpty()) return "missing"
+        val item = withWatchedMark(existing, id, ids ?: emptyList(), now()) ?: return "already"
+        putLibraryItem(authKey, item)
+        return "marked"
+    }
+
     /** Short description of the library state of a video, for logging ("offset=688s watched=false mtime=..."). */
     @Throws(IOException::class)
     fun describe(authKey: String, id: MediaId): String {
@@ -197,6 +213,25 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
         ) {
             /** Episode title of a video ("tt123:6:22"), or null. */
             fun episodeTitle(videoId: String): String? = videos.firstOrNull { it.id == videoId }?.title?.ifEmpty { null }
+        }
+
+        /**
+         * The library item with the watched mark of this video set, or null if it is already marked.
+         * @param videoIds the series' video ids in Stremio's order (empty for a movie)
+         */
+        @JvmStatic
+        fun withWatchedMark(existing: JsonObject, id: MediaId, videoIds: List<String>, now: String): JsonObject? {
+            val state = existing["state"].obj() ?: return null
+            val newState: JsonObject = if (id.isSeries()) {
+                val field = WatchedBitField.parse(state.str("watched").ifEmpty { null }, videoIds)
+                if (field.get(id.videoId()) || !videoIds.contains(id.videoId())) return null
+                field.set(id.videoId(), true)
+                JsonObject(state + ("watched" to JsonPrimitive(field.toString())))
+            } else {
+                if (state.long("flaggedWatched", 0) > 0 || state.long("timesWatched", 0) > 0) return null
+                JsonObject(state + ("flaggedWatched" to JsonPrimitive(1)) + ("timesWatched" to JsonPrimitive(1)))
+            }
+            return JsonObject(existing + ("state" to newState) + ("_mtime" to JsonPrimitive(now)))
         }
 
         /** Name, poster and episode list from Cinemeta (the source Stremio uses for the watched order). */

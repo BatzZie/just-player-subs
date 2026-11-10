@@ -389,6 +389,7 @@ public final class AutoSubs implements Player.Listener {
             intent.putExtra("end_by", "playback_completion");
             if (mediaId != null) prefs.setResume(mediaId.videoId(), 0, true);
             Log.i(TAG, "Result for the caller: playback completed (Stremio marks it watched itself)");
+            ensureWatchedLater(prefs.stremioAuthKeyForSync(), mediaId);
             return true;
         }
         if (STREMIO_RESULT_WITHOUT_DURATION) {
@@ -430,6 +431,33 @@ public final class AutoSubs implements Player.Listener {
 
     /** Each stop (and each new start) gets a new token; older background writes stop when they see a newer one. */
     private static final java.util.concurrent.atomic.AtomicLong stremioSyncToken = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Safety net: Stremio marks a finished video watched itself, but its library sync right after (e.g. while it
+     * autoplays the next episode) can overwrite that mark. Check the account a few times and set only the missing
+     * mark. Not cancelled by the next start: that is exactly when the mark gets lost.
+     */
+    private static void ensureWatchedLater(String authKey, MediaId id) {
+        if (authKey == null || id == null) return;
+        Thread t = new Thread(() -> {
+            autosubs.core.StremioApi api = new autosubs.core.StremioApi();
+            long started = System.currentTimeMillis();
+            for (long at : new long[]{10_000, 30_000, 60_000, 120_000}) {
+                try {
+                    long wait = started + at - System.currentTimeMillis();
+                    if (wait > 0) Thread.sleep(wait);
+                    String r = api.ensureWatched(authKey, id);
+                    Log.i(TAG, "Stremio watched check " + id + " after " + (at / 1000) + "s: " + r
+                            + " (" + api.describe(authKey, id) + ")");
+                } catch (InterruptedException e) {
+                    return;
+                } catch (Exception e) {
+                    Log.w(TAG, "Stremio watched check failed: " + e.getMessage());
+                }
+            }
+        }, "StremioWatched");
+        t.start();
+    }
 
     private boolean reportToStremio(boolean finished) {
         final String authKey = prefs.stremioAuthKeyForSync();

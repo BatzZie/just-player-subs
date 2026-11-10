@@ -72,3 +72,35 @@ class StremioPositionOnlyTest {
         assertEquals("tt1:1:4", s.str("video_id"))
     }
 }
+
+class StremioWatchedMarkTest {
+    private val now = "2026-11-07T15:00:00.000Z"
+    private fun state(item: JsonObject) = item["state"].obj()!!
+
+    @Test fun watchedMarkOnlySetsTheMissingBit() {
+        val ids = (1..10).map { "tt6226232:7:$it" }
+        val bits = WatchedBitField.parse(null, ids).also { it.set("tt6226232:7:2", true) }.toString()
+        val existing = JsonUtil.parse("""{"_id":"tt6226232","_mtime":"2024-01-01T00:00:00.000Z","customField":42,
+            "state":{"video_id":"tt6226232:7:3","timeOffset":0,"duration":1166833,"timesWatched":2,"watched":"$bits"}}""").obj()!!
+        val item = StremioApi.withWatchedMark(existing, MediaId("tt6226232", 7, 1), ids, now)!!
+        val s = state(item)
+        val field = WatchedBitField.parse(s.str("watched"), ids)
+        assertEquals(true, field.get("tt6226232:7:1"))
+        assertEquals(true, field.get("tt6226232:7:2"))
+        assertEquals(false, field.get("tt6226232:7:3"))
+        assertEquals("tt6226232:7:3", s.str("video_id"))
+        assertEquals(2L, s.long("timesWatched", 0))
+        assertEquals(now, item.str("_mtime"))
+        assertEquals(42L, item.long("customField", 0))
+        // Already marked: nothing to write
+        assertEquals(null, StremioApi.withWatchedMark(existing, MediaId("tt6226232", 7, 2), ids, now))
+    }
+
+    @Test fun watchedMarkForAMovie() {
+        val existing = JsonUtil.parse("""{"_id":"tt1877830","state":{"timesWatched":0,"flaggedWatched":0,"timeOffset":0}}""").obj()!!
+        val s = state(StremioApi.withWatchedMark(existing, MediaId("tt1877830", -1, -1), emptyList(), now)!!)
+        assertEquals(1L, s.long("flaggedWatched", 0))
+        assertEquals(null, StremioApi.withWatchedMark(JsonUtil.parse("""{"state":{"timesWatched":1}}""").obj()!!,
+            MediaId("tt1877830", -1, -1), emptyList(), now))
+    }
+}
