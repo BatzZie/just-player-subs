@@ -110,14 +110,17 @@ final class FrameRateSwitcher {
         return best;
     }
 
-    /** The mode with the same resolution whose refresh rate is a whole multiple of the frame rate (highest wins). */
+    /** The mode with the same resolution whose refresh rate is an exact whole multiple of the frame rate. */
     static Display.Mode bestMode(Display.Mode[] modes, Display.Mode active, float fps) {
         Display.Mode best = null;
         for (Display.Mode m : modes) {
             if (m.getPhysicalWidth() != active.getPhysicalWidth() || m.getPhysicalHeight() != active.getPhysicalHeight()) continue;
             float ratio = m.getRefreshRate() / fps;
-            if (ratio < 0.999f || Math.abs(ratio - Math.round(ratio)) > 0.002f * Math.round(ratio)) continue;
-            if (best == null || m.getRefreshRate() > best.getRefreshRate()) best = m;
+            // Exact multiples only: 120 Hz is no multiple of 23.976 (that would be 119.88) and judders
+            if (ratio < 0.999f || Math.abs(ratio - Math.round(ratio)) > 0.0005f * Math.round(ratio)) continue;
+            // Of the fitting modes, the one closest to the current refresh rate (24 fps -> 24 Hz, not 120 Hz;
+            // 25 fps -> 50 Hz, not 25 Hz, when the TV runs at 60 Hz)
+            if (best == null || Math.abs(m.getRefreshRate() - active.getRefreshRate()) < Math.abs(best.getRefreshRate() - active.getRefreshRate())) best = m;
         }
         return best;
     }
@@ -149,8 +152,9 @@ final class FrameRateSwitcher {
                 Display d = window.getDecorView().getDisplay();
                 if (d != null && d.getMode().getModeId() == best.getModeId()) {
                     Log.i(AutoSubs.TAG, "Display switched to " + best.getRefreshRate() + " Hz");
-                    // Give the TV a moment to show the picture again
-                    main.postDelayed(resume, 300);
+                    // Give the TV and the receiver (HDMI audio) time to sync again
+                    main.removeCallbacks(resume);
+                    main.postDelayed(resume, 1500);
                 }
             }
         };
