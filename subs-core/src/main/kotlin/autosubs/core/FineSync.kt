@@ -4,12 +4,16 @@ import kotlin.math.abs
 
 /**
  * Fine-tuning after a good single offset: a subtitle made for another edit of the same episode (WEB vs BluRay)
- * is often a few hundred ms off after each ad break. Measures, line by line, how far the subtitle still is from
- * the reference (MKV index), splits the video where that remainder clearly changes, and gives each part its own
- * offset. Young Sheldon S07E02 went from 0.5 s late at the end to within 0.1 s.
+ * is often a few hundred ms off after each ad break. Measures, on the pattern of the surrounding lines, how far
+ * each part still is from the reference (MKV index), splits the video where that clearly changes (optimal
+ * partitioning) and gives each part its own offset.
  */
 object FineSync {
-    private const val MATCH_MS = 1500L
+    private const val LOCAL_WINDOW_MS = 15_000L
+    private const val LOCAL_MIN_LINES = 6
+    private const val LOCAL_RANGE_MS = 3000L
+    private const val LOCAL_STEP_MS = 20L
+    private const val LOCAL_MATCH_MS = 200L
     private const val MIN_STEP_MS = 150L
     private const val MIN_LINES = 10
     private const val MAX_LINES = 900
@@ -27,11 +31,57 @@ object FineSync {
     fun refine(refStartsMs: List<Long>, subStartsMs: LongArray, scale: Double, offsetMs: Long): SegmentSync.Result? {
         val refs = refStartsMs.sorted()
         if (refs.size < 2 * MIN_LINES || subStartsMs.isEmpty()) return null
+        // The remainder of each line, measured on the pattern of its neighbours (about 30 s): where lines are 1-2 s
+        // apart, matching line by line can pair each line with the previous one and look right while it is a
+        // whole line off (Young Sheldon S07E02's cold open was 2.2 s off this way)
+        val times = subStartsMs.sorted().map { Math.round(it * scale) + offsetMs }
         val pairs = ArrayList<Pair>()
-        for (s in subStartsMs.sorted()) {
-            val t = Math.round(s * scale) + offsetMs
-            val r = nearest(refs, t) ?: continue
-            if (abs(r - t) <= MATCH_MS) pairs.add(Pair(t, r - t))
+        var lo = 0
+        var hi = 0
+        for (i in times.indices) {
+            val t = times[i]
+            while (lo < i && times[lo] < t - LOCAL_WINDOW_MS) lo++
+            while (hi < times.size && times[hi] <= t + LOCAL_WINDOW_MS) hi++
+            val n = hi - lo
+            if (n < LOCAL_MIN_LINES) continue
+            var bestD = 0L
+            var bestC = -1
+            val steps = (2 * LOCAL_RANGE_MS / LOCAL_STEP_MS).toInt() + 1
+            val counts = IntArray(steps)
+            for (k in 0 until steps) {
+                val d = k * LOCAL_STEP_MS - LOCAL_RANGE_MS
+                var c = 0
+                for (j in lo until hi) {
+                    val r = nearest(refs, times[j] + d) ?: continue
+                    if (abs(r - times[j] - d) <= LOCAL_MATCH_MS) c++
+                }
+                counts[k] = c
+                if (c > bestC) {
+                    bestC = c
+                    bestD = d
+                }
+            }
+            var second = 0
+            for (k in 0 until steps) {
+                val d = k * LOCAL_STEP_MS - LOCAL_RANGE_MS
+                if (abs(d - bestD) > 500) second = maxOf(second, counts[k])
+            }
+            if (bestC < maxOf(4, (n * 0.45).toInt()) || bestC < second * 1.3) continue
+            // The single offset is the default: another one must fit this part clearly better
+            if (abs(bestD) > 400) {
+                var atZero = 0
+                for (k in 0 until steps) if (abs(k * LOCAL_STEP_MS - LOCAL_RANGE_MS) <= 200) atZero = maxOf(atZero, counts[k])
+                if (bestC < atZero * 1.5 + 1) bestD = 0
+            }
+            // Precise remainder: median distance of the matched lines at that offset
+            val ds = ArrayList<Long>()
+            for (j in lo until hi) {
+                val r = nearest(refs, times[j] + bestD) ?: continue
+                if (abs(r - times[j] - bestD) <= LOCAL_MATCH_MS) ds.add(r - times[j])
+            }
+            if (ds.isEmpty()) continue
+            ds.sort()
+            pairs.add(Pair(t, ds[ds.size / 2]))
         }
         if (pairs.size < 2 * MIN_LINES || pairs.size > MAX_LINES) return null
         val x = DoubleArray(pairs.size) { pairs[it].residualMs.toDouble() }
