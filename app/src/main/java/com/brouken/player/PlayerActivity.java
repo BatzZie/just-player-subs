@@ -1231,7 +1231,8 @@ public class PlayerActivity extends Activity {
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         MediaCodecUtil.setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
         @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                .setExtensionRendererMode(mPrefs.decoderPriority);
+                .setExtensionRendererMode(mPrefs.decoderPriority)
+                .setMediaCodecSelector(com.brouken.player.subs.AudioDecoders.selector(mPrefs.decoderPriority));
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
