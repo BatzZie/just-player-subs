@@ -16,6 +16,8 @@ subtitles for streams (e.g. Stremio with Real-Debrid as external player). Instal
   playing.
 - Frame rate measured from the index (24 vs 23.976, PAL), piecewise sync for other cuts, agreeing-window sync
   for dense references with drift correction; best of the top 3 candidates chosen by fit.
+- Fine sync: after a good single offset, per-part corrections where the subtitle steps a few hundred ms after
+  ad breaks (another edit of the same episode).
 - Manual timing with the D-pad, per-file memory. Local files (content://, file://): OpenSubtitles hash and MKV
   index read from the file; a subtitle file next to the video wins.
 - Faster stream start: OkHttp with Happy Eyeballs (IPv6/IPv4 race) and no sidecar `.srt` probes on streams.
