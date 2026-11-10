@@ -218,6 +218,7 @@ public final class AutoSubs implements Player.Listener {
         player.removeListener(launchTransition);
         player.addListener(launchTransition);
         if (skin != null) skin.onPlayerStarted(player);
+        logDecoders(player);
 
         if (uri == null || !uri.equals(mediaUri)) {
             reset();
@@ -1188,6 +1189,55 @@ public final class AutoSubs implements Player.Listener {
     }
 
     // ---------------------------------------------------------------- Player.Listener
+
+    private static boolean dolbyVisionCapsLogged;
+    private Player decoderLogPlayer;
+
+    /** Logs which video/audio decoder is used, and once what the Dolby Vision decoders report (for DV checks). */
+    private void logDecoders(Player player) {
+        if (!(player instanceof androidx.media3.exoplayer.ExoPlayer) || player == decoderLogPlayer) return;
+        decoderLogPlayer = player;
+        ((androidx.media3.exoplayer.ExoPlayer) player).addAnalyticsListener(new androidx.media3.exoplayer.analytics.AnalyticsListener() {
+            @Override
+            public void onVideoDecoderInitialized(@androidx.annotation.NonNull EventTime eventTime, @androidx.annotation.NonNull String decoderName,
+                                                  long initializedTimestampMs, long initializationDurationMs) {
+                Log.i(TAG, "Video decoder: " + decoderName);
+            }
+
+            @Override
+            public void onVideoInputFormatChanged(@androidx.annotation.NonNull EventTime eventTime, @androidx.annotation.NonNull Format format,
+                                                  @androidx.annotation.Nullable androidx.media3.exoplayer.DecoderReuseEvaluation evaluation) {
+                Log.i(TAG, "Video format: " + format.sampleMimeType + " " + format.codecs + " " + format.width + "x" + format.height
+                        + " " + format.frameRate + "fps");
+            }
+
+            @Override
+            public void onAudioDecoderInitialized(@androidx.annotation.NonNull EventTime eventTime, @androidx.annotation.NonNull String decoderName,
+                                                  long initializedTimestampMs, long initializationDurationMs) {
+                Log.i(TAG, "Audio decoder: " + decoderName);
+            }
+        });
+        if (dolbyVisionCapsLogged) return;
+        dolbyVisionCapsLogged = true;
+        executor.execute(() -> {
+            try {
+                for (android.media.MediaCodecInfo info : new android.media.MediaCodecList(android.media.MediaCodecList.ALL_CODECS).getCodecInfos()) {
+                    if (info.isEncoder()) continue;
+                    for (String type : info.getSupportedTypes()) {
+                        if (!"video/dolby-vision".equalsIgnoreCase(type)) continue;
+                        StringBuilder sb = new StringBuilder();
+                        for (android.media.MediaCodecInfo.CodecProfileLevel pl : info.getCapabilitiesForType(type).profileLevels) {
+                            sb.append(" p").append(Integer.numberOfTrailingZeros(pl.profile))
+                                    .append("/l").append(Integer.numberOfTrailingZeros(pl.level) + 1);
+                        }
+                        Log.i(TAG, "Dolby Vision decoder " + info.getName() + ":" + sb);
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Codec list: " + e);
+            }
+        });
+    }
 
     private final java.util.ArrayDeque<Long> recoveries = new java.util.ArrayDeque<>();
     private static final int MAX_RECOVERIES = 3;
