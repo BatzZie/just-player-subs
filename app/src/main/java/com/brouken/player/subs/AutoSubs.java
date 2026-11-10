@@ -164,6 +164,7 @@ public final class AutoSubs implements Player.Listener {
 
     /** Title parts from the file name, until Cinemeta answers. */
     private boolean titleFromMeta;
+    private boolean resultGiven;
 
     /**
      * Puts a language in front of the preferred audio languages (the user's own setting stays as fallback).
@@ -340,6 +341,7 @@ public final class AutoSubs implements Player.Listener {
         lastDurationMs = -1;
         startPositionMs = -1;
         mediaId = null;
+        resultGiven = false;
         titleFromMeta = false;
         pendingEmbeddedChoice = null;
         resumeChecked = false;
@@ -413,6 +415,18 @@ public final class AutoSubs implements Player.Listener {
      */
     public boolean completeResult(android.content.Intent intent, boolean finished) {
         rememberPosition();
+        if (resultGiven) {
+            // Just Player can call finish() again (e.g. a late "ended" while Stremio already starts the next
+            // episode): one result per video, never a second "completed"
+            Log.i(TAG, "Result already given for this video, no second result");
+            return false;
+        }
+        resultGiven = true;
+        if (finished && !(startPositionMs >= 0 && lastDurationMs > 0 && lastPositionMs >= lastDurationMs * FINISHED)) {
+            // "Ended" without having played this video (no tracks, no duration): not a completed episode
+            Log.i(TAG, "Ended without playback (position " + lastPositionMs + " of " + lastDurationMs + "), not completed");
+            finished = false;
+        }
         if (!finished) {
             if (!intent.hasExtra("position") && lastPositionMs >= 0) intent.putExtra("position", (int) lastPositionMs);
             if (!intent.hasExtra("duration") && lastDurationMs > 0) intent.putExtra("duration", (int) lastDurationMs);
@@ -551,9 +565,13 @@ public final class AutoSubs implements Player.Listener {
                         Log.i(TAG, "Stremio wrote " + (p == null ? "nothing" : p.videoId + " at " + (p.offsetMs / 1000) + "s")
                                 + ", repairing to " + (pos / 1000) + "s");
                     }
-                    boolean isNew = api.writePosition(authKey, id, pos, dur, at == 0 ? watched : 0);
-                    Log.i(TAG, "Stremio position written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000)
-                            + "s" + (isNew ? " (new item)" : ""));
+                    if (!api.writePosition(authKey, id, pos, dur, at == 0 ? watched : 0)) {
+                        // Stremio adds what it plays to the library itself: if it isn't there, our identification
+                        // is probably wrong; never add a title to the user's library
+                        Log.i(TAG, "Stremio: " + id + " is not in the library, position not written");
+                        return;
+                    }
+                    Log.i(TAG, "Stremio position written: " + id + " at " + (pos / 1000) + "s of " + (dur / 1000) + "s");
                 } catch (InterruptedException e) {
                     return;
                 } catch (Exception e) {

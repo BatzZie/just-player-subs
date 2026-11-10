@@ -59,11 +59,8 @@ object MediaIdentifier {
                 val id = meta.str("imdb_id", meta.str("id"))
                 if (!id.startsWith("tt")) continue
                 val name = normalize(meta.str("name"))
-                var score = when {
-                    name == wanted -> 10
-                    name.startsWith(wanted) || wanted.startsWith(name) -> 3
-                    else -> continue
-                }
+                var score = nameScore(name, wanted)
+                if (score == 0) continue
                 val metaYear = parseYear(meta.str("releaseInfo", meta.str("year")))
                 if (year > 0 && metaYear > 0) {
                     val diff = Math.abs(metaYear - year)
@@ -81,6 +78,20 @@ object MediaIdentifier {
             CoreLog.w("Cinemeta search failed: $e")
             null
         }
+    }
+
+    /**
+     * 10 for the same (normalized) title, 3 for a partial match of about the same length, else 0. A short leftover
+     * of a file name ("dv") must not match any film whose name starts with it.
+     */
+    @JvmStatic
+    fun nameScore(name: String, wanted: String): Int {
+        if (name.isEmpty() || wanted.isEmpty()) return 0
+        if (name == wanted) return 10
+        val shorter = minOf(name.length, wanted.length)
+        val longer = maxOf(name.length, wanted.length)
+        if ((name.startsWith(wanted) || wanted.startsWith(name)) && shorter >= 4 && shorter >= 0.6 * longer) return 3
+        return 0
     }
 
     @JvmStatic

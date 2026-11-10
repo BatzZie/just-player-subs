@@ -161,3 +161,15 @@ class SourceParsingTest {
         assertTrue(c.hashMatch); assertTrue(c.machineTranslated); assertEquals("123", c.legacyId)
     }
 }
+
+class CinemetaMatchTest {
+    private fun score(name: String, wanted: String) = MediaIdentifier.nameScore(MediaIdentifier.normalize(name), MediaIdentifier.normalize(wanted))
+
+    @Test fun exactTitle() = assertEquals(10, score("The Batman", "the batman"))
+    @Test fun shortLeftoverIsNoMatch() {
+        assertEquals(0, score("Dvija", "DV"))
+        assertEquals(0, score("Dvija", "Dvi"))
+    }
+    @Test fun muchLongerTitleIsNoMatch() = assertEquals(0, score("Fallout: The Ghoul Log", "Fallout"))
+    @Test fun almostSameLengthIsPartial() = assertEquals(3, score("Spider-Man: Homecoming", "Spider-Man Homecomin"))
+}

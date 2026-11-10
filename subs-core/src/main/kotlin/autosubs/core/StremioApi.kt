@@ -97,15 +97,16 @@ class StremioApi(private val base: String = "https://api.strem.io/api") {
     /**
      * Writes only the position of one video: video_id, timeOffset, duration, lastWatched, time watched.
      * Stremio's own watched bookkeeping (the watched bitfield, flaggedWatched, timesWatched) is never touched.
-     * @return true if the item was new in the library
+     * @return false if the title isn't in the library (then nothing is written)
      */
     @Throws(IOException::class)
     fun writePosition(authKey: String, id: MediaId, positionMs: Long, durationMs: Long, watchedMs: Long): Boolean {
-        val existing = getLibraryItem(authKey, id.imdbId)
-        val meta = if (existing == null) fullMeta(id.type(), id.imdbId) else null
-        putLibraryItem(authKey, withProgress(existing, id.imdbId, id.type(), id.videoId(), meta?.name, meta?.poster,
+        // Only update what Stremio itself put in the library (it does so when it starts playing something);
+        // a wrongly identified video must never end up in the user's library
+        val existing = getLibraryItem(authKey, id.imdbId) ?: return false
+        putLibraryItem(authKey, withProgress(existing, id.imdbId, id.type(), id.videoId(), null, null,
             positionMs, durationMs, watchedMs, false, now(), false))
-        return existing == null
+        return true
     }
 
     /**
