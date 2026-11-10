@@ -1205,6 +1205,7 @@ public final class AutoSubs implements Player.Listener {
             Map<String, Double> scales = new HashMap<>();
             Map<String, AutoSync.Result> results = new HashMap<>();
             Map<String, autosubs.core.SegmentSync.Result> segResults = new HashMap<>();
+            Map<String, autosubs.core.SegmentSync.Result> fineResults = new HashMap<>();
             for (SubtitleCandidate c : alternatives) {
                 SubtitleTrack t = known.get(c.id);
                 if (t == null) {
@@ -1231,6 +1232,14 @@ public final class AutoSubs implements Player.Listener {
                 tracks.put(c.id, t);
                 scales.put(c.id, sc);
                 if (r != null) results.put(c.id, r);
+                // A good single offset can still be a few hundred ms off after ad breaks (other edit): fine-tune
+                if (r != null && r.fit() >= 0.5) {
+                    autosubs.core.SegmentSync.Result fine = autosubs.core.FineSync.refine(refs, t.startTimesMs(), sc, r.offsetMs);
+                    if (fine != null) {
+                        Log.i(TAG, "Fine sync " + fine + ": " + c);
+                        fineResults.put(c.id, fine);
+                    }
+                }
                 // No clear single offset: maybe a different cut (recap, extra scene) -> offsets per part
                 if (r == null || r.fit() < 0.5) {
                     autosubs.core.SegmentSync.Result seg = autosubs.core.SegmentSync.estimate(refs, t.startTimesMs(), sc);
@@ -1262,6 +1271,7 @@ public final class AutoSubs implements Player.Listener {
                     autosubs.core.SegmentSync.Result seg = segResults.get(chosen.id);
                     switchTo(chosen, tracks.get(chosen.id), scales.get(chosen.id), seg != null || r == null ? 0 : r.offsetMs);
                     if (seg != null) applySegments(seg);
+                    else if (fineResults.get(chosen.id) != null) applySegments(fineResults.get(chosen.id));
                 } else if (segResults.get(current.id) != null) {
                     applySegments(segResults.get(current.id));
                 } else if (cur != null) {
@@ -1270,7 +1280,8 @@ public final class AutoSubs implements Player.Listener {
                         Log.i(TAG, "Frame rate correction: scale " + scale + " -> " + measuredScale);
                         scale = measuredScale;
                     }
-                    finishSync(cur.offsetMs);
+                    if (fineResults.get(current.id) != null) applySegments(fineResults.get(current.id));
+                    else finishSync(cur.offsetMs);
                 } else if (manual) {
                     startSync(true); // fall back to watching along
                 }
