@@ -32,9 +32,27 @@ class FineSyncTest {
         assertTrue(abs(r.segments[1].fromMs - 601_000) < 10_000, r.toString())
     }
 
+    @Test fun findsAShortBlockInTheMiddle() {
+        val r1 = Random(5)
+        var t0 = 10_000L
+        val sub = LongArray(400) { t0 += 2500 + r1.nextLong(3000); t0 }
+        val r0 = Random(6)
+        // 1.1 s late for one minute early in the video, otherwise right
+        val refs = sub.filter { r0.nextDouble() < 0.85 }.map { it + 500 + (if (it in 60_000..120_000) -1100 else 0) + r0.nextLong(-120, 121) }
+        val r = FineSync.refine(refs, sub, 1.0, 500)
+        assertNotNull(r)
+        assertTrue(abs(r.offsetAt(90_000) - (500 - 1100)) <= 60, r.toString())
+        assertTrue(abs(r.offsetAt(30_000) - 500) <= 60, r.toString())
+        assertTrue(abs(r.offsetAt(600_000) - 500) <= 60, r.toString())
+    }
+
     @Test fun leavesAGoodOffsetAlone() {
         val sub = subtitle(3)
         assertNull(FineSync.refine(reference(sub, -500, 0, 0, 4), sub, 1.0, -500))
+        for (seed in 10 until 30) {
+            val s = subtitle(seed)
+            assertNull(FineSync.refine(reference(s, 0, 0, 0, seed + 100), s, 1.0, 0), "noise split for seed $seed")
+        }
     }
 
     /** Real data from the Shield (sync-debug files): fine-tuning must never make the fit worse. */
@@ -49,7 +67,7 @@ class FineSyncTest {
                 val starts = v.obj()!!["starts"].arr()!!.map { it.toString().toLong() }.toLongArray()
                 val sc0 = v.obj()!!["scale"].toString().toDouble()
                 val m = AutoSync.estimateWithScale(refs, starts, sc0) ?: AutoSync.estimateConsistent(refs, starts, sc0) ?: continue
-                if (m.second.fit() < 0.5) continue
+                if (m.second.fit() < 0.4) continue
                 val sc = m.first
                 val off = m.second.offsetMs
                 val fine = FineSync.refine(refs, starts, sc, off)

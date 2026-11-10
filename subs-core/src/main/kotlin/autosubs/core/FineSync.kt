@@ -9,10 +9,12 @@ import kotlin.math.abs
  * offset. Young Sheldon S07E02 went from 0.5 s late at the end to within 0.1 s.
  */
 object FineSync {
-    private const val MATCH_MS = 700L
+    private const val MATCH_MS = 1500L
     private const val MIN_STEP_MS = 150L
     private const val MIN_LINES = 10
-    private const val MAX_SEGMENTS = 8
+    private const val MAX_LINES = 900
+    /** Cost of one extra part, in ms of summed error: a step must explain clearly more than noise. */
+    private const val PENALTY = 3000.0
     private const val MIN_CORRECTION_MS = 80L
 
     private class Pair(val timeMs: Long, val residualMs: Long)
@@ -31,84 +33,79 @@ object FineSync {
             val r = nearest(refs, t) ?: continue
             if (abs(r - t) <= MATCH_MS) pairs.add(Pair(t, r - t))
         }
-        if (pairs.size < 2 * MIN_LINES) return null
+        if (pairs.size < 2 * MIN_LINES || pairs.size > MAX_LINES) return null
+        val x = DoubleArray(pairs.size) { pairs[it].residualMs.toDouble() }
 
-        // Binary segmentation on the medians of the remainders
-        val bounds = ArrayList<Int>() // start indexes of segments
-        bounds.add(0)
-        split(pairs, 0, pairs.size, bounds)
-        bounds.sort()
-        // Merge neighbours that ended up close to each other
-        val segs = ArrayList<IntArray>()
-        for (i in bounds.indices) segs.add(intArrayOf(bounds[i], if (i + 1 < bounds.size) bounds[i + 1] else pairs.size))
+        // Optimal partitioning: least total error (sum of distances to each part's median) plus a penalty per part
+        val n = x.size
+        val best = DoubleArray(n + 1) { Double.MAX_VALUE }
+        val from = IntArray(n + 1)
+        best[0] = 0.0
+        val sorted = DoubleArray(n)
+        for (i in 0 until n) {
+            if (best[i] == Double.MAX_VALUE) continue
+            var len = 0
+            for (j in i until n) {
+                // insert x[j] into sorted[0..len)
+                var k = len
+                while (k > 0 && sorted[k - 1] > x[j]) { sorted[k] = sorted[k - 1]; k-- }
+                sorted[k] = x[j]
+                len++
+                if (len < MIN_LINES) continue
+                val c = best[i] + cost(sorted, len) + PENALTY
+                if (c < best[j + 1]) {
+                    best[j + 1] = c
+                    from[j + 1] = i
+                }
+            }
+        }
+        val cuts = ArrayList<IntArray>()
+        var end = n
+        while (end > 0) {
+            val st = from[end]
+            cuts.add(0, intArrayOf(st, end))
+            end = st
+        }
+        // Neighbours that ended up close to each other are one part
         var merged = true
-        while (merged && segs.size > 1) {
+        while (merged && cuts.size > 1) {
             merged = false
-            for (i in 0 until segs.size - 1) {
-                if (abs(median(pairs, segs[i]) - median(pairs, segs[i + 1])) < MIN_STEP_MS) {
-                    segs[i] = intArrayOf(segs[i][0], segs[i + 1][1])
-                    segs.removeAt(i + 1)
+            for (i in 0 until cuts.size - 1) {
+                if (abs(median(x, cuts[i]) - median(x, cuts[i + 1])) < MIN_STEP_MS) {
+                    cuts[i] = intArrayOf(cuts[i][0], cuts[i + 1][1])
+                    cuts.removeAt(i + 1)
                     merged = true
                     break
                 }
             }
         }
         val result = ArrayList<SegmentSync.Segment>()
-        for ((k, seg) in segs.withIndex()) {
-            val from = if (k == 0) 0L else (pairs[seg[0] - 1].timeMs + pairs[seg[0]].timeMs) / 2
-            val corrected = offsetMs + Math.round(median(pairs, seg) / 10.0) * 10
-            result.add(SegmentSync.Segment(from, corrected))
+        for ((k, seg) in cuts.withIndex()) {
+            val start = if (k == 0) 0L else (pairs[seg[0] - 1].timeMs + pairs[seg[0]].timeMs) / 2
+            result.add(SegmentSync.Segment(start, offsetMs + Math.round(median(x, seg) / 10.0) * 10))
         }
         if (result.size == 1 && abs(result[0].offsetMs - offsetMs) < MIN_CORRECTION_MS) return null
-        val matched = pairs.count { p ->
-            val o = result.last { it.fromMs <= p.timeMs || it === result[0] }.offsetMs - offsetMs
-            abs(p.residualMs - o) <= 250
+        var matched = 0
+        for ((k, seg) in cuts.withIndex()) {
+            val o = (result[k].offsetMs - offsetMs).toDouble()
+            for (i in seg[0] until seg[1]) if (abs(x[i] - o) <= 250) matched++
         }
         CoreLog.i("FineSync: ${pairs.size} lines, segments " + result.joinToString(" ") { "${it.fromMs / 1000}s:${it.offsetMs}" })
         return SegmentSync.Result(result, matched, pairs.size)
     }
 
-    private fun split(pairs: List<Pair>, from: Int, to: Int, bounds: MutableList<Int>) {
-        if (bounds.size >= MAX_SEGMENTS || to - from < 2 * MIN_LINES) return
-        var bestAt = -1
-        var bestGain = 0.0
-        val whole = cost(pairs, from, to)
-        for (at in from + MIN_LINES..to - MIN_LINES) {
-            val left = median(pairs, intArrayOf(from, at))
-            val right = median(pairs, intArrayOf(at, to))
-            if (abs(left - right) < MIN_STEP_MS) continue
-            val gain = whole - cost(pairs, from, at) - cost(pairs, at, to)
-            if (gain > bestGain) {
-                bestGain = gain
-                bestAt = at
-            }
-        }
-        if (bestAt < 0) return
-        // The step must explain the lines clearly: per line of the smaller part ~120 ms less error, and most of
-        // its lines must really sit on their own side of the step (not a few outliers pulling the median)
-        val smaller = if (bestAt - from < to - bestAt) intArrayOf(from, bestAt) else intArrayOf(bestAt, to)
-        val other = if (smaller[0] == from) intArrayOf(bestAt, to) else intArrayOf(from, bestAt)
-        val own = median(pairs, smaller)
-        val theirs = median(pairs, other)
-        val onOwnSide = (smaller[0] until smaller[1]).count { abs(pairs[it].residualMs - own) < abs(pairs[it].residualMs - theirs) }
-        if (bestGain < 120.0 * (smaller[1] - smaller[0]) || onOwnSide < 0.75 * (smaller[1] - smaller[0])) return
-        bounds.add(bestAt)
-        split(pairs, from, bestAt, bounds)
-        split(pairs, bestAt, to, bounds)
-    }
-
-    /** Sum of absolute deviations from the median (robust against lines split differently). */
-    private fun cost(pairs: List<Pair>, from: Int, to: Int): Double {
-        val m = median(pairs, intArrayOf(from, to))
+    /** Sum of distances to the median of a sorted array. */
+    private fun cost(sorted: DoubleArray, len: Int): Double {
+        val m = if (len % 2 == 1) sorted[len / 2] else (sorted[len / 2 - 1] + sorted[len / 2]) / 2
         var c = 0.0
-        for (i in from until to) c += minOf(abs(pairs[i].residualMs - m), 400.0)
+        for (i in 0 until len) c += abs(sorted[i] - m)
         return c
     }
 
-    private fun median(pairs: List<Pair>, range: IntArray): Double {
-        val v = (range[0] until range[1]).map { pairs[it].residualMs }.sorted()
+    private fun median(x: DoubleArray, range: IntArray): Double {
+        val v = x.copyOfRange(range[0], range[1]).also { it.sort() }
         if (v.isEmpty()) return 0.0
-        return if (v.size % 2 == 1) v[v.size / 2].toDouble() else (v[v.size / 2 - 1] + v[v.size / 2]) / 2.0
+        return if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2
     }
 
     private fun nearest(sorted: List<Long>, t: Long): Long? {

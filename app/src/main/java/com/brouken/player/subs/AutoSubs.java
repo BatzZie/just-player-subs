@@ -230,10 +230,6 @@ public final class AutoSubs implements Player.Listener {
         return "+" + (SystemClock.elapsedRealtime() - attachedAt) + " ms";
     }
 
-    @Override
-    public void onIsLoadingChanged(boolean isLoading) {
-        Log.d(TAG, "Player loading=" + isLoading + " " + sinceAttach());
-    }
 
     public AutoSubs(Activity activity) {
         this.activity = activity;
@@ -1251,7 +1247,7 @@ public final class AutoSubs implements Player.Listener {
                 scales.put(c.id, sc);
                 if (r != null) results.put(c.id, r);
                 // A good single offset can still be a few hundred ms off after ad breaks (other edit): fine-tune
-                if (r != null && r.fit() >= 0.5) {
+                if (r != null && r.fit() >= 0.4) {
                     autosubs.core.SegmentSync.Result fine = autosubs.core.FineSync.refine(refs, t.startTimesMs(), sc, r.offsetMs);
                     if (fine != null) {
                         Log.i(TAG, "Fine sync " + fine + ": " + c);
