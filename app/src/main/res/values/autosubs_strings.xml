@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="autosubs_menu_title">Online subtitles</string>
+    <string name="autosubs_recovered">Playback error, continuing</string>
     <string name="autosubs_menu_empty">Nothing to choose yet. Languages and other options are in Settings.</string>
     <string name="autosubs_status_searching">searching…</string>
     <string name="autosubs_status_found">%d found</string>

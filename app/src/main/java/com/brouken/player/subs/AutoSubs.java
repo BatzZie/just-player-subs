@@ -18,6 +18,7 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.media3.common.C;
+import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Format;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackSelectionOverride;
@@ -1187,6 +1188,61 @@ public final class AutoSubs implements Player.Listener {
     }
 
     // ---------------------------------------------------------------- Player.Listener
+
+    private final java.util.ArrayDeque<Long> recoveries = new java.util.ArrayDeque<>();
+    private static final int MAX_RECOVERIES = 3;
+    private static final long RECOVERY_WINDOW_MS = 5 * 60_000;
+
+    /**
+     * Playback errors that are worth a retry: glitches in a decoder or the audio output, and network errors of
+     * the stream. Errors that would repeat (unsupported format, DRM, missing file) are left to the player.
+     */
+    private static boolean isRecoverable(int code) {
+        switch (code) {
+            case PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND:
+            case PlaybackException.ERROR_CODE_IO_NO_PERMISSION:
+            case PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED:
+            case PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_DECODER_INIT_FAILED:
+            case PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED:
+            case PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES:
+            case PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED:
+            case PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED:
+                return false;
+            default:
+                // DRM errors (6000-6999) never recover by retrying
+                return code < 6000 || code >= 7000;
+        }
+    }
+
+    /**
+     * Restarts playback at the same position after a recoverable error, at most 3 times in 5 minutes.
+     * @return true if the error is handled (the player shouldn't show it or stop)
+     */
+    public boolean recover(PlaybackException error) {
+        if (player == null || mediaUri == null || !isRecoverable(error.errorCode)) return false;
+        long now = SystemClock.elapsedRealtime();
+        while (!recoveries.isEmpty() && now - recoveries.peekFirst() > RECOVERY_WINDOW_MS) recoveries.pollFirst();
+        if (recoveries.size() >= MAX_RECOVERIES) {
+            Log.w(TAG, "Playback error, not recovering (" + recoveries.size() + " times in 5 min): " + error.getErrorCodeName());
+            return false;
+        }
+        recoveries.addLast(now);
+        long position = player.getCurrentPosition();
+        Log.w(TAG, "Playback error " + error.getErrorCodeName() + " at " + (position / 1000) + "s, restarting there ("
+                + recoveries.size() + "/" + MAX_RECOVERIES + "): " + error.getMessage()
+                + (error.getCause() != null ? " / " + error.getCause() : ""));
+        final Player p = player;
+        main.post(() -> {
+            if (player != p) return;
+            p.seekTo(position);
+            p.prepare();
+            p.setPlayWhenReady(true);
+            toast(activity.getString(R.string.autosubs_recovered));
+        });
+        return true;
+    }
 
     @Override
     public void onPlaybackStateChanged(int state) {

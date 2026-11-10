@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="autosubs_menu_title">Online ondertitels</string>
+    <string name="autosubs_recovered">Afspeelfout, gaat verder</string>
     <string name="autosubs_menu_empty">Nog niets te kiezen. Talen en andere opties staan in Instellingen.</string>
     <string name="autosubs_status_searching">zoeken…</string>
     <string name="autosubs_status_found">%d gevonden</string>
