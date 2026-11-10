@@ -377,8 +377,9 @@ public final class PlayerSkin {
     }
 
     private static String speedText(float s) {
-        String t = s == (int) s ? String.valueOf((int) s) : String.valueOf(s);
-        return t.replace('.', ',') + "×";
+        java.text.NumberFormat nf = java.text.NumberFormat.getNumberInstance();
+        nf.setMaximumFractionDigits(2);
+        return nf.format(s) + "×";
     }
 
     private void updateSpeedBadge() {

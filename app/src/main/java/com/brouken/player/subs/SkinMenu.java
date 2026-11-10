@@ -167,7 +167,7 @@ final class SkinMenu {
 
         // Size: as wide as the content (within limits), not higher than the space above the button
         int minW = dp(density, 240), maxW = Math.min(dp(density, 520), screenW - dp(density, 32));
-        list.measure(View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST), View.MeasureSpec.UNSPECIFIED);
+        list.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         int width = Math.max(minW, Math.min(maxW, list.getMeasuredWidth()));
         list.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED);
         int[] loc = new int[2];
